@@ -150,7 +150,7 @@ fn drain(mut env: JNIEnv<'_>, cb: JObject<'_>, rx: &std::sync::mpsc::Receiver<Ev
         match ev {
             Evt::Progress(done, total, rate) => {
                 let _ = env.call_method(
-                    cb.clone(),
+                    &cb,
                     "onProgress",
                     "(IJJJ)V",
                     &[
