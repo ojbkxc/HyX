@@ -46,6 +46,11 @@ const BATCH_MAX_BYTES: u64 = 32 * 1024 * 1024;
 /// 接收端单条 uni stream 的读取上限；须 ≥ `BATCH_MAX_BYTES + 帧头余量`。
 const MAX_STREAM_BYTES: usize = 64 * 1024 * 1024;
 
+/// Hard cap on a single decompressed chunk. zstd can expand a tiny on-wire
+/// payload hugely, so bounding the per-chunk decompressed size bounds memory
+/// regardless of peer-supplied `chunk_size` (finding: decompression bomb).
+const MAX_CHUNK_SIZE: usize = 16 * 1024 * 1024;
+
 /// Maximum per-file size we'll honour from a peer-supplied manifest.
 /// Without this cap a hostile peer can advertise a multi-petabyte
 /// `file_size`, leading the receiver to compute an enormous
@@ -131,6 +136,13 @@ impl<'a> FileTransferSession<'a> {
         F: FnMut(u64),
     {
         debug!("Starting file send: {:?}", path);
+
+        if self.config.chunk_size == 0 || self.config.chunk_size as usize > MAX_CHUNK_SIZE {
+            return Err(Error::Protocol(format!(
+                "chunk_size {} out of range (0 < size <= {MAX_CHUNK_SIZE})",
+                self.config.chunk_size
+            )));
+        }
 
         let mut reader = ChunkReader::new(path, self.config.chunk_size as usize).await?;
         let total_chunks = reader.total_chunks();
@@ -264,6 +276,12 @@ impl<'a> FileTransferSession<'a> {
                 "streams_to_receive {streams_to_receive} > total_chunks {total_chunks}"
             )));
         }
+        if self.config.chunk_size == 0 || self.config.chunk_size as usize > MAX_CHUNK_SIZE {
+            return Err(Error::Protocol(format!(
+                "peer-supplied chunk_size {} out of range (0 < size <= {MAX_CHUNK_SIZE})",
+                self.config.chunk_size
+            )));
+        }
 
         let writer =
             ChunkWriter::new(output_path, self.config.chunk_size as usize, file_size).await?;
@@ -343,7 +361,14 @@ impl<'a> FileTransferSession<'a> {
                             "compressed chunk but compression disabled in config".to_string(),
                         )
                     })?;
-                    decomp.decompress(payload)?
+                    let out = decomp.decompress(payload)?;
+                    if out.len() > MAX_CHUNK_SIZE {
+                        return Err(Error::Protocol(format!(
+                            "decompressed chunk of {} bytes exceeds per-chunk cap {MAX_CHUNK_SIZE}",
+                            out.len()
+                        )));
+                    }
+                    out
                 } else {
                     payload.to_vec()
                 };
@@ -435,10 +460,16 @@ async fn write_loop(
     done: oneshot::Sender<Result<[u8; 32]>>,
 ) {
     let result = async {
+        // Track whether we reached the explicit `Finalize` token. If the
+        // channel closes without it (receiver errored / dropped mid-transfer)
+        // we must NOT promote the still-incomplete `.partial` file and must
+        // NOT destroy it — leaving it in place is what lets a later resume
+        // continue from the save point instead of restarting.
+        let mut finalized = false;
         let mut group: Vec<(u64, Vec<u8>)> = Vec::new();
-        while let Some(item) = rx.recv().await {
-            match item {
-                WriteItem::Batch(batch) => {
+        loop {
+            match rx.recv().await {
+                Some(WriteItem::Batch(batch)) => {
                     for (idx, data) in batch {
                         if group.last().map(|(li, _)| *li + 1 == idx).unwrap_or(false) {
                             group.push((idx, data));
@@ -448,11 +479,23 @@ async fn write_loop(
                         }
                     }
                 }
-                WriteItem::Finalize => break,
+                Some(WriteItem::Finalize) => {
+                    finalized = true;
+                    break;
+                }
+                None => break,
             }
         }
-        write_contiguous(&mut writer, &mut group).await?;
-        writer.finalize().await
+        if finalized {
+            write_contiguous(&mut writer, &mut group).await?;
+            writer.finalize().await
+        } else {
+            // Early abort: drop the writer without renaming. `.partial` stays
+            // on disk so resume can pick up from here.
+            Err(Error::Other(
+                "receive aborted before Finalize; partial retained for resume".to_string(),
+            ))
+        }
     }
     .await;
     let _ = done.send(result);
