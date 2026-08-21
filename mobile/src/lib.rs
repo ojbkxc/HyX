@@ -81,8 +81,10 @@ fn forget_active() {
 
 /// Map the FFI `compression` knob (0=off, 1=adaptive, 2=always) onto ConfigMessage.
 fn config_from(chunk_bytes: jint, compression: jint) -> ConfigMessage {
-    let mut c = ConfigMessage::default();
-    c.chunk_size = (chunk_bytes as u32).max(64 * 1024);
+    let mut c = ConfigMessage {
+        chunk_size: (chunk_bytes as u32).max(64 * 1024),
+        ..ConfigMessage::default()
+    };
     match compression {
         0 => c.compression_enabled = false,
         2 => {
@@ -210,9 +212,9 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'loca
     mut env: JNIEnv<'local>,
     _this: JObject<'local>,
     port: jint,
-    chunk_bytes: jint,
+    _chunk_bytes: jint,
     _fsync_every: jlong,
-    compression: jint,
+    _compression: jint,
     _aggregation: jint,
     save_dir: jni::objects::JString<'local>,
     cb: JObject<'local>,
@@ -223,7 +225,6 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'loca
         .unwrap_or_default();
 
     let (tx, rx) = std::sync::mpsc::channel();
-    let cfg = config_from(chunk_bytes, compression);
 
     let join = runtime().spawn(async move {
         let mut session = match P2PSession::accept(bind_addr(port), identity(), device_id()).await {
@@ -329,7 +330,14 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxPairRendezvous<'loc
 
     let join =
         runtime().spawn(async move {
-            let rv = match P2PSession::parse_peer_addr(&server, DEFAULT_RENDEZVOUS_PORT) {
+            let rv = match P2PSession::parse_peer_addr(
+                &server,
+                if port > 0 {
+                    port as u16
+                } else {
+                    DEFAULT_RENDEZVOUS_PORT
+                },
+            ) {
                 Ok(addr) => addr,
                 Err(e) => {
                     let _ = tx.send(Evt::Done(Err(e.to_string())));
@@ -359,7 +367,7 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxPairRendezvous<'loc
 /// `String hyxCancel()` — abort the in-flight transfer.
 #[no_mangle]
 pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxCancel<'local>(
-    env: JNIEnv<'local>,
+    _env: JNIEnv<'local>,
     _this: JObject<'local>,
 ) -> jobject {
     if let Some(h) = ACTIVE.lock().expect("active lock").take() {
