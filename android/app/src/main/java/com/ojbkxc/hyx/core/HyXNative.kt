@@ -76,6 +76,9 @@ object HyXNative {
 
     external fun hyxCancel(): String?
 
+    /** Real LAN discovery; returns newline-joined `"name\tip:port"` lines ("" if none found). */
+    external fun hyxDiscover(port: Int): String?
+
     fun interface ProgressCallback {
         /** Mirrors Rust-native progress: phase, bytes done, bytes total, speed B/s. */
         fun onProgress(phase: Int, transferred: Long, total: Long, speed: Long)
