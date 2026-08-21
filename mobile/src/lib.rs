@@ -142,10 +142,7 @@ async fn send_path(
 
     let src = std::path::Path::new(path);
     let mut state_path = src.to_path_buf();
-    if let Some(name) = src
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-    {
+    if let Some(name) = src.file_name().map(|n| n.to_string_lossy().into_owned()) {
         state_path.set_file_name(format!(".{name}.hyx-resume"));
     }
     let state_path = (src.parent().is_some()).then_some(state_path);
