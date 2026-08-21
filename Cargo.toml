@@ -33,6 +33,9 @@ sha2 = "0.10"
 # 默认：仅 CLI（小体积）
 default = ["cli"]
 cli = ["hyx-cli"]
+# GUI 已移除（上游为 Iced）。声明该 feature 仅为让 main.rs 的
+# `#[cfg(feature = "gui")]` 脚手架在 `-D warnings` 下通过编译。
+gui = []
 
 [profile.release]
 opt-level = 3

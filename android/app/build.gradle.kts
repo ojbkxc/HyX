@@ -61,7 +61,9 @@ android {
 // them into src/main/jniLibs before packaging. NDK must be installed; the
 // `cargo-ndk` binary must be on PATH (install via: cargo install cargo-ndk).
 val cargoNdk = tasks.register<Exec>("cargoNdk") {
-    workingDir = rootProject.parent ?: projectDir.parentFile
+    // rootProject is the `android` gradle root; its projectDir is <repo>/android,
+    // so its parentFile is the repo root where mobile/Cargo.toml lives.
+    workingDir = rootProject.projectDir.parentFile
     commandLine("sh", "-c",
         "cargo ndk -t arm64-v8a -t armeabi-v7a -o android/app/src/main/jniLibs build " +
             "--release -p hyx-mobile --manifest-path mobile/Cargo.toml"
