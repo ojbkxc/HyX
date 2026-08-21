@@ -160,7 +160,7 @@ async fn discover_peers(port: u16) -> String {
     )
     .await
     {
-        Ok(m) => m,
+        Ok(m) => Arc::new(m),
         Err(e) => {
             tracing::warn!("discovery manager failed: {e}");
             return String::new();
