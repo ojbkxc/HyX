@@ -26,3 +26,26 @@ fun formatDuration(millis: Long): String {
     return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
         else String.format(Locale.US, "%02d:%02d", m, s)
 }
+
+/** Best-effort MIME type from a file extension; defaults to application/octet-stream. */
+fun mimeTypeOf(name: String): String {
+    val ext = name.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "mp4", "mkv", "webm", "mov", "avi" -> "video/$ext"
+        "mp3", "wav", "flac", "ogg", "m4a", "aac" -> "audio/$ext"
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        "bmp" -> "image/bmp"
+        "heic", "heif" -> "image/heic"
+        "pdf" -> "application/pdf"
+        "zip", "gz", "7z", "rar" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "doc", "docx" -> "application/msword"
+        "xls", "xlsx" -> "application/vnd.ms-excel"
+        "ppt", "pptx" -> "application/vnd.ms-powerpoint"
+        "txt", "md", "log", "json", "xml", "csv", "html", "htm" -> "text/plain"
+        else -> "application/octet-stream"
+    }
+}

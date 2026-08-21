@@ -1,0 +1,128 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+    paths:
+      - 'android/**'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK + NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
+            ndk;27.2.12479018
+          accept-android-sdk-licenses: true
+
+      - name: Setup Rust (Android target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG_VERSION="${{ github.event.inputs.version }}"
+          else
+            TAG_VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "tag=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          VERSION=${TAG_VERSION#v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # versionCode = semver -> (major*1_000_000 + minor*1_000 + patch)
+          IFS='.' read -ra PARTS <<< "$VERSION"
+          VERSION_CODE=0
+          for i in "${!PARTS[@]}"; do
+            MULT=$((10 ** (6 - i * 3)))
+            VERSION_CODE=$((VERSION_CODE + PARTS[i] * MULT))
+          done
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          # Write into the version catalog-driven build script.
+          sed -i -E "s/versionName *= *\"[^\"]*\"/versionName = \"$VERSION\"/" android/app/build.gradle.kts
+          sed -i -E "s/versionCode *= *[0-9]*/versionCode = $VERSION_CODE/" android/app/build.gradle.kts
+          echo "Updated to $TAG_VERSION (code: $VERSION_CODE)"
+
+      - name: Build Rust shared library (arm64)
+        run: >
+          cargo ndk -t arm64-v8a
+          -o android/app/src/main/jniLibs build --release
+          -p hyx-mobile --manifest-path mobile/Cargo.toml
+
+      - name: Assemble release APK (arm64, R8)
+        working-directory: android
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Rename APK
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          if ls android/app/build/outputs/apk/release/app-release.apk >/dev/null 2>&1; then
+            cp android/app/build/outputs/apk/release/app-release.apk "HyX-v${VERSION}-arm64.apk"
+          else
+            cp android/app/build/outputs/apk/release/app-release-unsigned.apk "HyX-v${VERSION}-arm64-unsigned.apk"
+          fi
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyX-APK-${{ steps.version.outputs.version }}
+          path: |
+            HyX-*.apk
+            android/app/build/outputs/apk/**/*.apk
+
+      - name: Create Release (if tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "HyX ${{ steps.version.outputs.tag }}"
+          body: |
+            ## HyX ${{ steps.version.outputs.version }}
+
+            **多链路极速 P2P 文件传输** — 基于 QUIC 的高速传输内核。
+
+            - Rust 内核：引擎 A/B 融合的单一路径、批量帧、增量 SHA-256
+            - QUIC 传输层优化：BBR 拥塞控制、滑动窗口、GSO
+            - Android arm64（R8 精简 + 资源缩减）
+            - 局域网自动发现、扫码/配对码互传、断点续传
+            - 收到的文件自动保存到系统「下载」目录
+
+            ### 安装
+            1. 下载 `HyX-v${VERSION}-arm64.apk`
+            2. 允许安装未知来源应用
+            3. 安装并打开，两台手机在同一 Wi-Fi 下即可互传
+          files: |
+            HyX-*.apk
+          draft: false
+          prerelease: false

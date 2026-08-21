@@ -1,6 +1,8 @@
 package com.ojbkxc.hyx.core
 
+import android.content.Context
 import android.util.Log
+import java.io.File
 
 /**
  * Thin JNI facade over the Rust `hyx-mobile` shared library.
@@ -24,6 +26,14 @@ object HyXNative {
     /** App-private file dir, set by HyXApp. Used as default receive landing zone. */
     @Volatile
     var appFilesDir: String = ""
+
+    /** Application context, set by HyXApp; needed for MediaStore Downloads export. */
+    @Volatile
+    var appContext: Context? = null
+
+    /** Private staging dir the Rust kernel writes received files into. */
+    @Volatile
+    var receiveDir: String = ""
 
     /** Must be called once, from HyXApp, before any other API. */
     fun ensureLoaded() {

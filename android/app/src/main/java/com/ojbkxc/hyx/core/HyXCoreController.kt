@@ -1,7 +1,13 @@
 package com.ojbkxc.hyx.core
 
+import android.content.ContentValues
+import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ojbkxc.hyx.ui.components.mimeTypeOf
 import com.ojbkxc.hyx.ui.model.Device
 import com.ojbkxc.hyx.ui.model.EngineSettings
 import com.ojbkxc.hyx.ui.model.HistoryRecord
@@ -9,6 +15,7 @@ import com.ojbkxc.hyx.ui.model.PairingCode
 import com.ojbkxc.hyx.ui.model.TransferDirection
 import com.ojbkxc.hyx.ui.model.TransferProgress
 import com.ojbkxc.hyx.ui.model.TransferStatus
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -89,10 +96,10 @@ class HyXCoreController : ViewModel() {
                     fsyncEveryBytes = cfg.fsyncEveryBytes,
                     compression = if (cfg.compression) 1 else 0,
                     aggregation = if (cfg.aggregation) 1 else 0,
-                    saveDir = HyXNative.appFilesDir,
+                    saveDir = HyXNative.receiveDir,
                     onProgress = ::recordProgress
                 )
-                if (!err.isNullOrEmpty()) failTransfer(err)
+                if (err.isNullOrEmpty()) exportReceivedToDownloads() else failTransfer(err)
             }
         } else {
             // No library: simulate a transfer so the UI stays demonstrable.
@@ -145,10 +152,10 @@ class HyXCoreController : ViewModel() {
                     serverAddress = server,
                     port = 14567,
                     compression = if (_settings.value.compression) 1 else 0,
-                    saveDir = HyXNative.appFilesDir,
+                    saveDir = HyXNative.receiveDir,
                     onProgress = ::recordProgress
                 )
-                if (!err.isNullOrEmpty()) failTransfer(err)
+                if (err.isNullOrEmpty()) exportReceivedToDownloads() else failTransfer(err)
             }
         } else {
             nudgeStatusToTransferring()
@@ -203,6 +210,56 @@ class HyXCoreController : ViewModel() {
 
     /** Send [filePath] to the best-known peer (real native transfer). */
     fun sendPickedFile(filePath: String) = sendFileToPeer(targetPeerAddress(), filePath)
+
+    /**
+     * Move received files from the private staging dir into the system Downloads
+     * collection via MediaStore (API 29+) or the public Downloads folder (< API 29).
+     * Idempotent: the staging dir is emptied, so re-calling is a no-op.
+     */
+    private fun exportReceivedToDownloads() {
+        val ctx = HyXNative.appContext ?: return
+        val staging = File(HyXNative.receiveDir.ifEmpty { return })
+        if (!staging.exists()) return
+        val files = staging.listFiles()?.filter { it.isFile } ?: return
+        files.forEach { f ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                insertIntoMediaStore(ctx, f)
+            } else {
+                legacyCopyToDownloads(f)
+            }
+        }
+        files.forEach { runCatching { it.delete() } }
+    }
+
+    private fun insertIntoMediaStore(ctx: Context, f: File) {
+        val resolver = ctx.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, f.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeTypeOf(f.name))
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
+        try {
+            resolver.openOutputStream(uri)?.use { out ->
+                f.inputStream().use { it.copyTo(out) }
+            }
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            runCatching { resolver.delete(uri, null, null) }
+        }
+    }
+
+    private fun legacyCopyToDownloads(f: File) {
+        runCatching {
+            val destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!destDir.exists()) destDir.mkdirs()
+            val dest = File(destDir, f.name)
+            f.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+        }
+    }
 
     fun pingPeer(id: String) {
         _devices.value = _devices.value.map {
