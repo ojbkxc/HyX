@@ -89,11 +89,13 @@ class HyXCoreController : ViewModel() {
                     fsyncEveryBytes = cfg.fsyncEveryBytes,
                     compression = if (cfg.compression) 1 else 0,
                     aggregation = if (cfg.aggregation) 1 else 0,
+                    saveDir = HyXNative.appFilesDir,
                     onProgress = ::recordProgress
                 )
-                if (err?.isNotEmpty() == true) failTransfer(err.toString())
+                if (!err.isNullOrEmpty()) failTransfer(err)
             }
         } else {
+            // No library: simulate a transfer so the UI stays demonstrable.
             simulateTransfer()
         }
         // Mock device appears on the LAN once we're listening; real beacon
@@ -101,11 +103,59 @@ class HyXCoreController : ViewModel() {
         fakePeer("对端手机", "192.168.1.66")
     }
 
+    /** Send one file to a discovered peer (sender side of the link). */
+    fun sendFileToPeer(peerAddress: String, filePath: String) {
+        if (_status.value == TransferStatus.Transferring) return
+        if (!HyXNative.isLoaded) {
+            simulateTransfer()
+            return
+        }
+        val cfg = _settings.value
+        _status.value = TransferStatus.Connecting
+        transferStartedMs = System.currentTimeMillis()
+        _progress.value = TransferProgress(
+            name = filePath.substringAfterLast('/').ifEmpty { "文件" },
+            direction = _direction.value,
+            transferredBytes = 0,
+            totalBytes = 0,
+            speedBps = 0.0,
+            elapsedMs = 0
+        )
+        transferJob = viewModelScope.launch(Dispatchers.IO) {
+            val err = HyXNative.hyxConnect(
+                peerAddress = peerAddress,
+                filePath = filePath,
+                chunkBytes = 1_048_576,
+                fsyncEveryBytes = cfg.fsyncEveryBytes,
+                compression = if (cfg.compression) 1 else 0,
+                aggregation = if (cfg.aggregation) 1 else 0,
+                port = 14567,
+                onProgress = ::recordProgress
+            )
+            if (!err.isNullOrEmpty()) failTransfer(err)
+        }
+    }
+
     fun pairWithCode(code: String) {
         val server = "rendezvous.hyx.dev:14567"
         _pairingCode.value = PairingCode(code, System.currentTimeMillis() + 300_000L)
         _status.value = TransferStatus.Pairing
-        nudgeStatusToTransferring()
+        if (HyXNative.isLoaded) {
+            transferStartedMs = System.currentTimeMillis()
+            transferJob = viewModelScope.launch(Dispatchers.IO) {
+                val err = HyXNative.hyxPairRendezvous(
+                    code = code,
+                    serverAddress = server,
+                    port = 14567,
+                    compression = if (_settings.value.compression) 1 else 0,
+                    saveDir = HyXNative.appFilesDir,
+                    onProgress = ::recordProgress
+                )
+                if (!err.isNullOrEmpty()) failTransfer(err)
+            }
+        } else {
+            nudgeStatusToTransferring()
+        }
         fakePeer("对端手机", null)
     }
 

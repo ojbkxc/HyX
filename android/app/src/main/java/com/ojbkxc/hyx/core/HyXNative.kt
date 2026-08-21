@@ -21,6 +21,10 @@ object HyXNative {
 
     private var loaded = false
 
+    /** App-private file dir, set by HyXApp. Used as default receive landing zone. */
+    @Volatile
+    var appFilesDir: String = ""
+
     /** Must be called once, from HyXApp, before any other API. */
     fun ensureLoaded() {
         if (loaded) return
@@ -37,27 +41,36 @@ object HyXNative {
 
     external fun hyxCreateDevice(selfCertFingerprint: String): String?
 
+    /** Bind + accept + receive the peer's files into [saveDir]. */
     external fun hyxStartListener(
         port: Int,
         chunkBytes: Int,
         fsyncEveryBytes: Long,
         compression: Int,
         aggregation: Int,
+        saveDir: String,
         onProgress: ProgressCallback
     ): String?
 
+    /** LAN-discover the peer, connect, then send [filePath]. */
     external fun hyxConnect(
         peerAddress: String,
+        filePath: String,
         chunkBytes: Int,
         fsyncEveryBytes: Long,
         compression: Int,
         aggregation: Int,
+        port: Int,
         onProgress: ProgressCallback
     ): String?
 
+    /** Rendezvous pairing, then receive the peer's files into [saveDir]. */
     external fun hyxPairRendezvous(
         code: String,
         serverAddress: String,
+        port: Int,
+        compression: Int,
+        saveDir: String,
         onProgress: ProgressCallback
     ): String?
 

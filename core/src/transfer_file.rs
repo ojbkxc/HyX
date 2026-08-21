@@ -68,9 +68,8 @@ pub fn validate_file_size(size: u64) -> Result<()> {
 /// chunks needed to cover `file_size` bytes when laid out under
 /// `chunk_size`. Single source of truth (the sender, receiver, and
 /// resume state all must agree).
-pub const fn chunk_count(file_size: u64, chunk_size: u32) -> u64 {
-    let cs = chunk_size as u64;
-    (file_size + cs - 1) / cs
+pub fn chunk_count(file_size: u64, chunk_size: u32) -> u64 {
+    file_size.div_ceil(chunk_size as u64)
 }
 
 /// Per-frame header: `[index: u64 LE | flags: u8 | payload_len: u32 LE]`.

@@ -68,7 +68,7 @@ impl TransferState {
             .into_iter()
             .enumerate()
             .map(|(idx, metadata)| {
-                let total_chunks = (metadata.size + chunk_size as u64 - 1) / chunk_size as u64;
+                let total_chunks = metadata.size.div_ceil(chunk_size as u64);
                 FileState {
                     file_index: idx as u32,
                     metadata,

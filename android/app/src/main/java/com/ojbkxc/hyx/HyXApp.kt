@@ -6,6 +6,7 @@ import com.ojbkxc.hyx.core.HyXNative
 class HyXApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        HyXNative.appFilesDir = filesDir.absolutePath
         HyXNative.ensureLoaded()
     }
 }

@@ -5,6 +5,12 @@
 
 use indicatif::{ProgressBar, ProgressStyle};
 
+/// External sink for live progress, invoked (in place, from the transfer
+/// loop) whenever bytes advance or the total becomes known. Closures capture
+/// whatever channel they like; the trait signature stays free of a concrete
+/// transport so `hyx-core` itself doesn't depend on any async messaging type.
+pub type ProgressCallback = Box<dyn Fn(u64, u64) + Send + Sync>;
+
 /// Unified progress state for tracking transfer progress
 pub struct ProgressState {
     /// Total bytes to transfer
@@ -13,6 +19,23 @@ pub struct ProgressState {
     transferred_bytes: u64,
     /// Progress bar from indicatif
     progress_bar: ProgressBar,
+    /// Optional hook fired on every update (used by the JNI bridge to stream
+    /// live bytes to the Android UI without blocking the transfer loop).
+    on_update: Option<ProgressCallback>,
+}
+
+impl ProgressState {
+    /// Install a live-progress sink. Fired with `(transferred, total)` on every
+    /// `add_bytes` / `set_total_bytes` / `finish`. Replaces any prior sink.
+    pub fn set_progress_callback(&mut self, cb: ProgressCallback) {
+        self.on_update = Some(cb);
+    }
+
+    fn emit(&self) {
+        if let Some(cb) = &self.on_update {
+            cb(self.transferred_bytes, self.total_bytes);
+        }
+    }
 }
 
 impl ProgressState {
@@ -38,6 +61,7 @@ impl ProgressState {
             total_bytes,
             transferred_bytes: 0,
             progress_bar,
+            on_update: None,
         }
     }
 
@@ -47,6 +71,7 @@ impl ProgressState {
         self.progress_bar.set_position(self.transferred_bytes);
         // Force a draw/tick to ensure the bar updates immediately
         self.progress_bar.tick();
+        self.emit();
     }
 
     /// Set the total bytes (useful when total is initially unknown)
@@ -74,11 +99,13 @@ impl ProgressState {
         self.progress_bar.set_length(total_bytes);
         // Force a tick to show the updated total
         self.progress_bar.tick();
+        self.emit();
     }
 
     /// Finish the progress bar
     pub fn finish(&self) {
         self.progress_bar.finish_with_message("Transfer complete!");
+        self.emit();
     }
 
     /// Get total bytes
