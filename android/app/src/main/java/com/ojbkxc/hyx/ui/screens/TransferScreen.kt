@@ -120,7 +120,7 @@ fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
 
         Spacer(Modifier.height(20.dp))
 
-        EngineSettingsCard(settings = settings, onChange = controller::updateSettings)
+        EngineSettingsCard(settings = settings, onChange = { updated -> controller.updateSettings { updated } })
 
         Spacer(Modifier.height(8.dp))
         StatusBadge(text = statusText(status), active = active)
