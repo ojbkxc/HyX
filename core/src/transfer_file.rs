@@ -489,7 +489,7 @@ async fn compress_chunk(
     if data.len() >= COMPRESS_OFFLOAD_BYTES {
         let comp = comp.clone();
         let owned = data.to_vec();
-        Ok(tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || -> Result<(Vec<u8>, bool), Error> {
             let mut cm = comp
                 .lock()
                 .map_err(|p| Error::Compression(format!("compressor lock poisoned: {p}")))?;
@@ -497,7 +497,7 @@ async fn compress_chunk(
             Ok((compressed, was_compressed))
         })
         .await
-        .map_err(|e| Error::Compression(format!("compress task panicked: {e}")))??)
+        .map_err(|e| Error::Compression(format!("compress task panicked: {e}")))?
     } else {
         let mut cm = comp
             .lock()
