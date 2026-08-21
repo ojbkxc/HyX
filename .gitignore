@@ -1,0 +1,15 @@
+# Rust
+/target
+**/*.rs.bk
+
+# 编辑器
+.vscode/
+.idea/
+*.iml
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 本地日志
+*.log
