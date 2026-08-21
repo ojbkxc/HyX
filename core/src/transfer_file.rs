@@ -23,10 +23,12 @@
 use std::collections::HashSet;
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use sha2::{Digest, Sha256};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, trace, warn};
 
 use crate::bandwidth::BandwidthLimiter;
@@ -142,16 +144,20 @@ impl<'a> FileTransferSession<'a> {
             );
         }
 
-        let mut compressor: Option<AdaptiveCompressor> = if self.config.compression_enabled {
+        // AdaptiveCompressor carries decision state; we route calls through an
+        // Arc<Mutex> so a large chunk's CPU burst can run off the async
+        // executor (spawn_blocking) without moving the compressor itself.
+        let compressor: Option<Arc<Mutex<AdaptiveCompressor>>> = if self.config.compression_enabled
+        {
             let sample_size = if self.config.adaptive_compression {
                 3
             } else {
                 0
             };
-            Some(AdaptiveCompressor::new(
+            Some(Arc::new(Mutex::new(AdaptiveCompressor::new(
                 self.config.compression_level,
                 sample_size,
-            ))
+            ))))
         } else {
             None
         };
@@ -175,9 +181,8 @@ impl<'a> FileTransferSession<'a> {
             let chunk_data = reader.read_chunk(chunk_index).await?;
             let uncompressed_size = chunk_data.len() as u64;
 
-            let (final_data, is_compressed) = if let Some(comp) = &mut compressor {
-                let (compressed, was_compressed, _decision_changed) = comp.compress(&chunk_data)?;
-                (compressed, was_compressed)
+            let (final_data, is_compressed) = if let Some(comp) = &compressor {
+                compress_chunk(comp, &chunk_data).await?
             } else {
                 (chunk_data, false)
             };
@@ -261,7 +266,7 @@ impl<'a> FileTransferSession<'a> {
             )));
         }
 
-        let mut writer =
+        let writer =
             ChunkWriter::new(output_path, self.config.chunk_size as usize, file_size).await?;
         let mut decompressor: Option<Decompressor> = if self.config.compression_enabled {
             Some(Decompressor::new())
@@ -269,7 +274,20 @@ impl<'a> FileTransferSession<'a> {
             None
         };
 
+        // 引擎B：磁盘写挪进独立后台任务，网络读与写盘重叠，吞掉逐次写盘的
+        // 延迟。有界 channel 提供背压：写盘落后时收端读自然停顿，内存有上界。
+        // 哈希仍在有序写回路径就地累计（见 ChunkWriter::record_hash），语义
+        // 与原先同步写完全一致。
+        let (batch_tx, batch_rx) = mpsc::channel::<WriteItem>(2);
+        let (done_tx, done_rx) = oneshot::channel::<Result<[u8; 32]>>();
+        tokio::spawn(write_loop(writer, batch_rx, done_tx));
+
         let mut seen: HashSet<u64> = HashSet::with_capacity(streams_to_receive as usize);
+        // 解压后的在途缓冲上限：一条流解压可远超其线上字节（高压缩率），
+        // 按解压字节数限流，防止在手机上吃爆内存。channel 容量 2 × 该值
+        // 即为写盘任务允许追赶网络读的最大内存差。
+        let mut current_batch: Vec<(u64, Vec<u8>)> = Vec::with_capacity(256);
+        let mut current_bytes: usize = 0;
         while (seen.len() as u64) < streams_to_receive {
             let mut stream = self.connection.accept_uni().await?;
             let raw = stream
@@ -318,23 +336,30 @@ impl<'a> FileTransferSession<'a> {
                     continue;
                 }
 
-                // Avoid an allocation per uncompressed chunk: write the slice
-                // straight into the chunk writer. Decompression still has to
-                // produce an owned Vec because zstd needs scratch space.
-                let written = if flags & FLAG_COMPRESSED != 0 {
+                // 解出/复制为自有数据交由后台写；progress/回调仍按接收字节
+                // 即时上报，前端进度不因磁盘而卡顿。
+                let data = if flags & FLAG_COMPRESSED != 0 {
                     let decomp = decompressor.as_mut().ok_or_else(|| {
                         Error::Protocol(
                             "compressed chunk but compression disabled in config".to_string(),
                         )
                     })?;
-                    let decompressed = decomp.decompress(payload)?;
-                    let len = decompressed.len() as u64;
-                    writer.write_chunk(chunk_index, &decompressed).await?;
-                    len
+                    decomp.decompress(payload)?
                 } else {
-                    writer.write_chunk(chunk_index, payload).await?;
-                    payload.len() as u64
+                    payload.to_vec()
                 };
+                let written = data.len() as u64;
+                current_batch.push((chunk_index, data));
+                current_bytes += written as usize;
+                if current_bytes >= FLUSH_BATCH_BYTES {
+                    batch_tx
+                        .send(WriteItem::Batch(std::mem::take(&mut current_batch)))
+                        .await
+                        .map_err(|_| {
+                            Error::Other("file writer task ended unexpectedly".to_string())
+                        })?;
+                    current_bytes = 0;
+                }
 
                 if let Some(ref mut p) = progress {
                     p.add_bytes(written);
@@ -350,9 +375,23 @@ impl<'a> FileTransferSession<'a> {
                     streams_to_receive
                 );
             }
+
+            if !current_batch.is_empty() {
+                batch_tx
+                    .send(WriteItem::Batch(std::mem::take(&mut current_batch)))
+                    .await
+                    .map_err(|_| Error::Other("file writer task ended unexpectedly".to_string()))?;
+            }
         }
 
-        let checksum = writer.finalize().await?;
+        // 正常收齐：发终止令牌让写盘任务落盘并 finalize（乱序/续传时整读）。
+        batch_tx
+            .send(WriteItem::Finalize)
+            .await
+            .map_err(|_| Error::Other("file writer task ended unexpectedly".to_string()))?;
+        let checksum = done_rx
+            .await
+            .map_err(|_| Error::Other("file writer task terminated".to_string()))??;
         debug!("File receive complete, SHA256: {:02x?}", &checksum[..8]);
         Ok(checksum)
     }
@@ -375,6 +414,96 @@ impl<'a> FileTransferSession<'a> {
             .await
             .map_err(|e| Error::Quic(format!("stream stopped: {e}")))?;
         Ok(())
+    }
+}
+
+/// Message to the background disk writer task (引擎B). `Finalize` tells it
+/// to `sync_all` + rename + finalize once all batches are flushed; if the
+/// channel closes without `Finalize`, the write-back aborted early and the
+/// task drops the writer without renaming any `.partial` into place.
+enum WriteItem {
+    Batch(Vec<(u64, Vec<u8>)>),
+    Finalize,
+}
+
+/// Background disk writer: drains batches, coalesces contiguous ordered
+/// frames into single seeks/writes (引擎D), keeps the incremental hash in
+/// sync, then finalizes on `Finalize`. Runs detached from the network
+/// reader so disk latency overlaps the next stream's reads.
+async fn write_loop(
+    mut writer: ChunkWriter,
+    mut rx: mpsc::Receiver<WriteItem>,
+    done: oneshot::Sender<Result<[u8; 32]>>,
+) {
+    let result = async {
+        let mut group: Vec<(u64, Vec<u8>)> = Vec::new();
+        while let Some(item) = rx.recv().await {
+            match item {
+                WriteItem::Batch(batch) => {
+                    for (idx, data) in batch {
+                        if group.last().map(|(li, _)| *li + 1 == idx).unwrap_or(false) {
+                            group.push((idx, data));
+                        } else {
+                            write_contiguous(&mut writer, &mut group).await?;
+                            group.push((idx, data));
+                        }
+                    }
+                }
+                WriteItem::Finalize => break,
+            }
+        }
+        write_contiguous(&mut writer, &mut group).await?;
+        writer.finalize().await
+    }
+    .await;
+    let _ = done.send(result);
+}
+
+/// Flush a run of (index, data) frames to disk in one contiguous write
+/// when possible, preserving the chunk writer's hash bookkeeping.
+async fn write_contiguous(writer: &mut ChunkWriter, group: &mut Vec<(u64, Vec<u8>)>) -> Result<()> {
+    if group.is_empty() {
+        return Ok(());
+    }
+    writer.write_chunks(group).await?;
+    group.clear();
+    Ok(())
+}
+
+/// Chunks at/above this size have their zstd compression pushed off the
+/// async executor; smaller ones pay the task-spawn overhead for nothing.
+const COMPRESS_OFFLOAD_BYTES: usize = 64 * 1024;
+
+/// Max decompressed bytes buffered per batch handed to the background disk
+/// writer, bounding memory regardless of the on-wire (compressed) batch size.
+const FLUSH_BATCH_BYTES: usize = 64 * 1024 * 1024;
+
+/// Compress one chunk, offloading CPU-bound zstd work to `spawn_blocking`
+/// for large chunks so the sender task stays responsive to the network and
+/// cancellation. Compressor state (adaptive decision) is guarded by a Mutex
+/// and consumed in strict per-chunk order.
+async fn compress_chunk(
+    comp: &Arc<Mutex<AdaptiveCompressor>>,
+    data: &[u8],
+) -> Result<(Vec<u8>, bool)> {
+    if data.len() >= COMPRESS_OFFLOAD_BYTES {
+        let comp = comp.clone();
+        let owned = data.to_vec();
+        Ok(tokio::task::spawn_blocking(move || {
+            let mut cm = comp
+                .lock()
+                .map_err(|p| Error::Compression(format!("compressor lock poisoned: {p}")))?;
+            let (compressed, was_compressed, _decision) = cm.compress(&owned)?;
+            Ok((compressed, was_compressed))
+        })
+        .await
+        .map_err(|e| Error::Compression(format!("compress task panicked: {e}")))?)
+    } else {
+        let mut cm = comp
+            .lock()
+            .map_err(|p| Error::Compression(format!("compressor lock poisoned: {p}")))?;
+        let (compressed, was_compressed, _decision) = cm.compress(data)?;
+        Ok((compressed, was_compressed))
     }
 }
 
@@ -516,18 +645,60 @@ impl ChunkWriter {
         let offset = index * self.chunk_size as u64;
         self.file.seek(SeekFrom::Start(offset)).await?;
         self.file.write_all(data).await?;
-        if !self.out_of_order {
-            if offset == self.next_expected {
-                self.hasher.update(data);
-                self.next_expected = self.next_expected.saturating_add(data.len() as u64);
-            } else if offset < self.next_expected {
-                // 重复块（resume 重发已收块）：哈希已计，忽略。
-            } else {
-                // 缺块/乱序：后续回退整读。
-                self.out_of_order = true;
+        self.record_hash(index, data);
+        Ok(())
+    }
+
+    /// 写回一段（尽量）连续有序的帧。引擎D：连续帧先拼接为单一写缓冲区，
+    /// 一次 seek + 一次 write_all，砍掉逐帧 seek 的 syscall 开销；哈希按帧
+    /// 就地累计，语义与逐帧 [`write_chunk`](Self::write_chunk) 完全一致。
+    pub async fn write_chunks(&mut self, chunks: &[(u64, Vec<u8>)]) -> Result<()> {
+        if chunks.is_empty() {
+            return Ok(());
+        }
+        let start = chunks[0].0;
+        let contiguous = chunks
+            .iter()
+            .enumerate()
+            .all(|(i, (idx, _))| *idx == start + i as u64);
+        if contiguous {
+            let total: usize = chunks.iter().map(|(_, d)| d.len()).sum();
+            let mut buf: Vec<u8> = Vec::with_capacity(total);
+            for (_, d) in chunks {
+                buf.extend_from_slice(d);
+            }
+            let offset = start * self.chunk_size as u64;
+            self.file.seek(SeekFrom::Start(offset)).await?;
+            self.file.write_all(&buf).await?;
+            for (i, (_, d)) in chunks.iter().enumerate() {
+                self.record_hash(start + i as u64, d);
+            }
+        } else {
+            for (idx, d) in chunks {
+                let offset = idx * self.chunk_size as u64;
+                self.file.seek(SeekFrom::Start(offset)).await?;
+                self.file.write_all(d).await?;
+                self.record_hash(*idx, d);
             }
         }
         Ok(())
+    }
+
+    /// 有序快路径的哈希记账：前缀连续则就地累计，重复块忽略，否则标记乱序。
+    fn record_hash(&mut self, index: u64, data: &[u8]) {
+        if self.out_of_order {
+            return;
+        }
+        let offset = index * self.chunk_size as u64;
+        if offset == self.next_expected {
+            self.hasher.update(data);
+            self.next_expected = self.next_expected.saturating_add(data.len() as u64);
+        } else if offset < self.next_expected {
+            // 重复块（resume 重发已收块）：哈希已计，忽略。
+        } else {
+            // 缺块/乱序：后续回退整读。
+            self.out_of_order = true;
+        }
     }
 
     fn partial_path(&self) -> PathBuf {

@@ -44,15 +44,16 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 /// Maximum idle before quinn tears down a connection.
 const MAX_IDLE_TIMEOUT_SECS: u64 = 60;
 
-/// Per-stream receive window. Sized to comfortably hold one in-flight
-/// chunk at the new 1 MiB default with room for the next one to start
-/// streaming before the previous one drains.
-const STREAM_RECEIVE_WINDOW: u32 = 8 * 1024 * 1024;
+/// Per-stream receive window. Sized ≥ one whole transfer batch (引擎B
+/// `BATCH_MAX_BYTES` = 32 MiB) so the sender can fill an entire batch
+/// without stalling on per-stream flow control; 64 MiB also covers
+/// `MAX_STREAM_BYTES`.
+const STREAM_RECEIVE_WINDOW: u32 = 64 * 1024 * 1024;
 
-/// Connection-level receive window. Sized for high-BDP links (gigabit
-/// at ~30 ms RTT is ~3.75 MB; 64 MiB leaves ample headroom and is
-/// well below the 2^62 VarInt limit).
-const RECEIVE_WINDOW: u32 = 64 * 1024 * 1024;
+/// Connection-level receive window. High-BDP: gigabit at ~30 ms RTT is
+/// ~3.75 MB; 96 MiB lets several batches remain in flight while the peer's
+/// disk stays behind, well under the 2^62 VarInt limit.
+const RECEIVE_WINDOW: u32 = 96 * 1024 * 1024;
 
 /// A QUIC endpoint bound to one UDP socket. Acts as both client and server.
 ///
@@ -277,6 +278,13 @@ fn transport_config() -> TransportConfig {
     t.stream_receive_window(VarInt::from_u32(STREAM_RECEIVE_WINDOW));
     t.receive_window(VarInt::from_u32(RECEIVE_WINDOW));
     t.send_window(RECEIVE_WINDOW as u64);
+
+    // 极速要旨：给整批在途让路。GSO 在支持的内核（Linux/Android）上把
+    // 大批同头 UDP 包合并发送，显著压低 CPU；初始 MTU 抬到典型链路值，
+    // 减少包数、摊薄固定开销。quinn 默认 Cubic 拥塞控制已是最佳内置选择
+    //（无公开 BBR 开关），此处不动以免在原子上引入风险。
+    t.enable_segmentation_offload(true);
+    t.initial_mtu(1432);
     t
 }
 
