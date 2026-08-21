@@ -248,6 +248,19 @@ async fn handle_connection(
                 let peer_b_fp: [u8; FINGERPRINT_LEN] = req.cert_fingerprint;
                 if let Err(e) = relay.reserve_session(token, peer_a_fp, peer_b_fp).await {
                     warn!("relay refused session for code {}: {e}", req.code);
+                    // Put the waiter back so the first peer isn't
+                    // stranded. Without this, dropping `waiter` closes
+                    // the oneshot and the first peer receives Expired
+                    // even though its TTL hasn't elapsed — a transient
+                    // relay refusal (e.g. a token collision or a
+                    // duplicate-fingerprint retry) would otherwise
+                    // waste the whole TTL. Re-insert only when the
+                    // slot is still empty so a racing registration
+                    // under the same code isn't clobbered.
+                    let mut waiting = state.waiting.lock().await;
+                    if !waiting.contains_key(&req.code) {
+                        waiting.insert(req.code.clone(), waiter);
+                    }
                     send_rejected(&mut wr, "relay refused session").await;
                     return Ok(());
                 }
@@ -296,6 +309,14 @@ async fn handle_connection(
     let (tx, rx) = oneshot::channel();
     {
         let mut waiting = state.waiting.lock().await;
+        // Drop expired waiters lazily on each access. Without this, a
+        // waiter whose owning task was cancelled (or simply hasn't been
+        // cleaned up yet) would cause a fresh registration under the
+        // same code to be rejected even though the slot is stale. The
+        // second-peer path already does this; mirror it here so both
+        // paths apply the same expiry policy.
+        let now = Instant::now();
+        waiting.retain(|_, w| w.expires_at > now);
         if waiting.contains_key(&req.code) {
             // Two peers raced both as "first". The second to grab the
             // lock loses and is rejected; user should retry.

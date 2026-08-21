@@ -46,7 +46,14 @@ impl DiscoveryManager {
     /// Start the discovery service. Spawns the broadcaster / receiver /
     /// cleanup tasks and records their handles so [`stop`](Self::stop) can
     /// abort them and release the bound UDP socket. Returns immediately.
+    /// Calling `start` again before [`stop`](Self::stop) first aborts the
+    /// previous tasks so re-starting doesn't leak the old loops.
     pub async fn start(&self) -> Result<()> {
+        // Abort any tasks from a prior start() so re-calling start doesn't
+        // leave the old broadcaster/receiver/cleanup loops running in the
+        // background (they would keep holding the UDP socket and the peers
+        // write lock).
+        self.stop();
         debug!("Starting discovery manager");
 
         // Spawn beacon broadcaster

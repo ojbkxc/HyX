@@ -238,11 +238,20 @@ async fn establish_via_relay(
 const _SESSION_TOKEN_LEN_DOCREF: usize = SESSION_TOKEN_LEN;
 
 async fn resolve_first(host_port: &str) -> Result<SocketAddr> {
+    // The traversal socket is bound to IPv4 wildcard (0.0.0.0:0), so we
+    // must pick an IPv4 STUN endpoint — an IPv6 resolution would fail
+    // silently at send_to time and surface as a confusing Network error
+    // deep inside STUN. Filter here so the failure is reported as a
+    // resolution problem with a clear message.
     lookup_host(host_port)
         .await
         .map_err(Error::Network)?
-        .next()
-        .ok_or_else(|| Error::Rendezvous(format!("could not resolve STUN server '{host_port}'")))
+        .find(|addr| addr.is_ipv4())
+        .ok_or_else(|| {
+            Error::Rendezvous(format!(
+                "could not resolve an IPv4 address for STUN server '{host_port}'"
+            ))
+        })
 }
 
 /// Generate a fresh 6-character base32 pairing code. Crockford-style:
