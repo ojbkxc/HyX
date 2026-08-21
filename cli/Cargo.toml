@@ -6,6 +6,11 @@ authors = ["ojbkxc"]
 description = "CLI interface for HyX file transfer"
 license = "MIT"
 
+[features]
+# Expunged GUI build (upstream: Iced). The feature is declared so the
+# `#[cfg(feature = "gui")]` scaffolding still type-checks under `-D warnings`.
+gui = []
+
 [dependencies]
 hyx-core = { path = "../core" }
 hyx-rendezvous = { path = "../rendezvous" }
