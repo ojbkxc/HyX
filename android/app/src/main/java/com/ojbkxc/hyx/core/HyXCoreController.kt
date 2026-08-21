@@ -98,9 +98,6 @@ class HyXCoreController : ViewModel() {
             // No library: simulate a transfer so the UI stays demonstrable.
             simulateTransfer()
         }
-        // Mock device appears on the LAN once we're listening; real beacon
-        // discovery replaces this once hyx-core discovery lands on Android.
-        fakePeer("对端手机", "192.168.1.66")
     }
 
     /** Send one file to a discovered peer (sender side of the link). */
@@ -156,7 +153,6 @@ class HyXCoreController : ViewModel() {
         } else {
             nudgeStatusToTransferring()
         }
-        fakePeer("对端手机", null)
     }
 
     fun scanQr(result: String) {
@@ -175,17 +171,38 @@ class HyXCoreController : ViewModel() {
 
     fun startDiscovery() {
         _devicesScanning.value = true
-        viewModelScope.launch {
-            delay(1200)
+        viewModelScope.launch(Dispatchers.IO) {
+            val raw = if (HyXNative.isLoaded) HyXNative.hyxDiscover(14567) else null
+            val found = raw.orEmpty()
+                .lineSequence()
+                .filter { it.isNotBlank() }
+                .mapNotNull { line ->
+                    val tab = line.indexOf('\t')
+                    if (tab < 0) return@mapNotNull null
+                    val name = line.substring(0, tab)
+                    val addr = line.substring(tab + 1)
+                    Device(
+                        id = addr,
+                        name = name,
+                        address = addr,
+                        via = Device.Via.Lan,
+                        connected = false
+                    )
+                }
+                .toList()
+            _devices.value = found
             _devicesScanning.value = false
-            if (_devices.value.isEmpty()) {
-                _devices.value = listOf(
-                    Device("pc-1", "桌面机 · Windows", "192.168.1.44", Device.Via.Lan, false),
-                    Device("mac-1", "MacBook Air", "192.168.1.98", Device.Via.Lan, false)
-                )
-            }
         }
     }
+
+    /** Pick the preferred target (a connected peer first, else any discovered one). */
+    fun targetPeerAddress(): String =
+        _devices.value.firstOrNull { it.connected }?.address
+            ?: _devices.value.firstOrNull()?.address
+            ?: ""
+
+    /** Send [filePath] to the best-known peer (real native transfer). */
+    fun sendPickedFile(filePath: String) = sendFileToPeer(targetPeerAddress(), filePath)
 
     fun pingPeer(id: String) {
         _devices.value = _devices.value.map {
@@ -206,18 +223,6 @@ class HyXCoreController : ViewModel() {
                 if (!HyXNative.isLoaded) simulateTransfer()
             }
         }
-    }
-
-    /** Show a peer in the device list (demo until real discovery lands). */
-    private fun fakePeer(name: String, address: String?) {
-        if (_devices.value.any { it.name == name }) return
-        _devices.value = _devices.value + Device(
-            id = name.hashCode().toString(),
-            name = name,
-            address = address,
-            via = if (address != null) Device.Via.Lan else Device.Via.Rendezvous,
-            connected = true
-        )
     }
 
     private fun recordProgress(phase: Int, transferred: Long, total: Long, speed: Long) {
