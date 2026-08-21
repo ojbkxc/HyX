@@ -197,7 +197,7 @@ impl Decompressor {
     /// expand into unbounded memory (decompression bomb).
     pub fn decompress_limited(&self, data: &[u8], max_out: usize) -> Result<Vec<u8>> {
         use std::io::Read;
-        let mut decoder = zstd::stream::read::Decoder::new(data)
+        let decoder = zstd::stream::read::Decoder::new(data)
             .map_err(|e| Error::Decompression(e.to_string()))?;
         let mut out = Vec::new();
         decoder

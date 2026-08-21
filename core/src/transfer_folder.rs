@@ -11,7 +11,7 @@ use std::time::{Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, trace};
 use uuid::Uuid;
 
 /// Reject paths the receiver should never write to: absolute paths,
