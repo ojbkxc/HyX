@@ -213,6 +213,10 @@ fn drain(mut env: JNIEnv<'_>, cb: JObject<'_>, rx: &std::sync::mpsc::Receiver<Ev
                         JValue::Long(rate),
                     ],
                 );
+                // Clear any exception thrown by the Kotlin callback so
+                // subsequent JNI calls (more progress events, the final
+                // jstring) don't silently fail with a pending exception.
+                let _ = env.exception_clear();
             }
             Evt::Done(res) => {
                 return match res {

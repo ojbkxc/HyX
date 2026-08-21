@@ -60,6 +60,8 @@ class HyXCoreController : ViewModel() {
     private var transferStartedMs = 0L
     // Set by cancelTransfer so the still-running native call's return value
     // (which surfaces as "Transfer cancelled") doesn't double-record a failure.
+    // @Volatile: written from the UI thread, read from Dispatchers.IO coroutines.
+    @Volatile
     private var cancelled = false
 
     init {
@@ -198,7 +200,13 @@ class HyXCoreController : ViewModel() {
         recordFinished(TransferStatus.Cancelled)
         transferJob?.cancel()
         _progress.value = null
-        _status.value = TransferStatus.Idle
+        cleanupSendCache()
+        // Hold the Cancelled status briefly before returning to Idle, mirroring
+        // failTransfer's 1.5 s hold so the user actually sees the cancellation.
+        viewModelScope.launch {
+            delay(1500)
+            _status.value = TransferStatus.Idle
+        }
     }
 
     fun startDiscovery() {
@@ -331,6 +339,7 @@ class HyXCoreController : ViewModel() {
         _status.value = TransferStatus.Completed
         recordFinished(TransferStatus.Completed)
         _progress.value = null
+        cleanupSendCache()
     }
 
     /** Standalone demo path for when libhyx_mobile.so isn't built. */
@@ -366,10 +375,20 @@ class HyXCoreController : ViewModel() {
         _status.value = TransferStatus.Failed
         recordFinished(TransferStatus.Failed)
         _progress.value = null
+        cleanupSendCache()
         viewModelScope.launch {
             delay(1500)
             _status.value = TransferStatus.Idle
         }
+    }
+
+    /**
+     * Delete staged send copies in the app cache (created by TransferScreen's
+     * copyToCache). Without this the cache grows unbounded across sends.
+     */
+    private fun cleanupSendCache() {
+        val ctx = HyXNative.appContext ?: return
+        File(ctx.cacheDir, "hyx_send").listFiles()?.forEach { runCatching { it.delete() } }
     }
 
     private fun loadSeedHistory() {
