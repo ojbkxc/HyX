@@ -38,7 +38,11 @@ pub async fn query(socket: &UdpSocket, server: SocketAddr) -> Result<SocketAddr>
         .map_err(Error::Network)?;
 
     let deadline = Instant::now() + QUERY_TIMEOUT;
-    let mut buf = [0u8; 1024];
+    // RFC 5389 allows STUN messages up to 1280 bytes; 1500 matches the
+    // typical Ethernet MTU and leaves headroom for servers that append
+    // SOFTWARE / FINGERPRINT attributes. 1024 could truncate such
+    // responses and cause us to miss the XOR-MAPPED-ADDRESS we need.
+    let mut buf = [0u8; 1500];
     loop {
         let (len, from) = match timeout_at(deadline, socket.recv_from(&mut buf)).await {
             Ok(Ok(v)) => v,
@@ -58,6 +62,14 @@ pub async fn query(socket: &UdpSocket, server: SocketAddr) -> Result<SocketAddr>
 /// reuse the same source-port mapping for any destination; symmetric NATs
 /// pick a fresh source port per destination.
 pub async fn classify_nat(socket: &UdpSocket, a: SocketAddr, b: SocketAddr) -> Result<NatClass> {
+    // Querying the same server twice always yields the same mapped port,
+    // which would falsely report Cone NAT even on a symmetric NAT. Reject
+    // up front so the caller gets a clear error instead of a bad decision.
+    if a == b {
+        return Err(Error::Protocol(
+            "classify_nat requires two distinct STUN servers".to_string(),
+        ));
+    }
     let map_a = query(socket, a).await?;
     let map_b = query(socket, b).await?;
     Ok(if map_a.port() == map_b.port() {

@@ -334,12 +334,19 @@ class HyXCoreController : ViewModel() {
         // done, and firing here would double-record history.
     }
 
-    /** Terminal success: record history once and clear the progress panel. */
+    /** Terminal success: record history once, clear the progress panel, then
+     *  return to Idle so the user can start the next transfer. Without the
+     *  Idle reset the status sticks at Completed and sendFileToPeer (which
+     *  requires Idle) silently refuses every later send. */
     private fun markCompleted() {
         _status.value = TransferStatus.Completed
         recordFinished(TransferStatus.Completed)
         _progress.value = null
         cleanupSendCache()
+        viewModelScope.launch {
+            delay(1500)
+            _status.value = TransferStatus.Idle
+        }
     }
 
     /** Standalone demo path for when libhyx_mobile.so isn't built. */

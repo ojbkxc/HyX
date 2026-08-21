@@ -153,6 +153,17 @@ impl RelayState {
         if peer_a_fp == peer_b_fp {
             return Err(RelayError::DuplicateFingerprint);
         }
+        // Reject a collision with an in-flight session. The rendezvous
+        // draws tokens with `rand::random()` so a collision is
+        // astronomically unlikely, but if it ever happened `insert`
+        // would silently overwrite the existing `Session` while its
+        // `addr_to_token` reverse-index entries kept pointing at the
+        // (now wrong) token — corrupting routing for the displaced
+        // session. Surface it as an error so the caller retries with a
+        // fresh token instead of corrupting state.
+        if self.sessions.contains_key(&token) {
+            return Err(RelayError::TokenInUse);
+        }
         let now = Instant::now();
         self.sessions.insert(
             token,
@@ -369,6 +380,8 @@ pub enum RelayError {
     Bind(std::io::Error),
     #[error("relay refused session: both peers share the same fingerprint")]
     DuplicateFingerprint,
+    #[error("relay refused session: session token already in use")]
+    TokenInUse,
 }
 
 /// Background task: periodically scan for idle sessions and evict
