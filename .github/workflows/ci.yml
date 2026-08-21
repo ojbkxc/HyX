@@ -65,14 +65,14 @@ jobs:
       - name: Setup Rust (Android targets)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android, armv7-linux-androideabi
+          targets: aarch64-linux-android
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
       - name: Build Rust shared libraries
         run: >
-          cargo ndk -t arm64-v8a -t armeabi-v7a
+          cargo ndk -t arm64-v8a
           -o android/app/src/main/jniLibs build --release
           -p hyx-mobile --manifest-path mobile/Cargo.toml
 
@@ -81,12 +81,12 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Assemble debug APK
+      - name: Assemble release APK (arm64, R8)
         working-directory: android
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: hyx-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: hyx-apk-arm64
+          path: android/app/build/outputs/apk/release/*.apk

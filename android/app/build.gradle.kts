@@ -16,7 +16,7 @@ android {
         versionName = "0.1.0"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
@@ -30,6 +30,8 @@ android {
         debug { isMinifyEnabled = false }
         release {
             isMinifyEnabled = true
+            shrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -65,7 +67,7 @@ val cargoNdk = tasks.register<Exec>("cargoNdk") {
     // so its parentFile is the repo root where mobile/Cargo.toml lives.
     workingDir = rootProject.projectDir.parentFile
     commandLine("sh", "-c",
-        "cargo ndk -t arm64-v8a -t armeabi-v7a -o android/app/src/main/jniLibs build " +
+        "cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build " +
             "--release -p hyx-mobile --manifest-path mobile/Cargo.toml"
     )
 }
