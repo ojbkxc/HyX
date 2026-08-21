@@ -23,13 +23,13 @@ use hyx_core::protocol::ConfigMessage;
 use hyx_core::reconnect::ReconnectConfig;
 use hyx_core::session::P2PSession;
 use hyx_core::transfer_folder::AcceptDecision;
+use hyx_core::Uuid;
 use hyx_core::DEFAULT_RENDEZVOUS_PORT;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jint, jlong, jobject};
 use jni::JNIEnv;
 use tokio::runtime::{Builder, Runtime};
 use tokio::task::AbortHandle;
-use uuid::Uuid;
 
 /// Event a JNI call waits on from the background transfer task.
 enum Evt {
@@ -42,7 +42,12 @@ enum Evt {
 /// One global Tokio runtime shared by every JNI call.
 static RT: OnceLock<Runtime> = OnceLock::new();
 fn runtime() -> &'static Runtime {
-    RT.get_or_init(|| Builder::new_multi_thread().enable_all().build().expect("tokio runtime"))
+    RT.get_or_init(|| {
+        Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+    })
 }
 
 /// Long-lived device identity (generated once, persisted by hyx-core).
@@ -93,7 +98,7 @@ fn config_from(chunk_bytes: jint, compression: jint) -> ConfigMessage {
 }
 
 /// Progress callback that mirrors bytes into the JNI event channel.
-fn progress_sink(tx: std::sync::mpsc::SyncSender<Evt>) -> ProgressCallback {
+fn progress_sink(tx: std::sync::mpsc::Sender<Evt>) -> ProgressCallback {
     let t0 = Instant::now();
     Box::new(move |done, total| {
         let el = t0.elapsed().as_secs_f64();
@@ -106,7 +111,7 @@ fn progress_sink(tx: std::sync::mpsc::SyncSender<Evt>) -> ProgressCallback {
 async fn receive_into(
     session: &mut P2PSession,
     dir: &str,
-    tx: std::sync::mpsc::SyncSender<Evt>,
+    tx: std::sync::mpsc::Sender<Evt>,
 ) -> Result<String, String> {
     let out = PathBuf::from(dir);
     let mut prog = ProgressState::new(0);
@@ -122,7 +127,7 @@ async fn receive_into(
 async fn send_path(
     session: &mut P2PSession,
     path: &str,
-    tx: std::sync::mpsc::SyncSender<Evt>,
+    tx: std::sync::mpsc::Sender<Evt>,
 ) -> Result<String, String> {
     let mut prog = ProgressState::new(0);
     prog.set_progress_callback(progress_sink(tx.clone()));
@@ -145,7 +150,7 @@ fn drain(mut env: JNIEnv<'_>, cb: JObject<'_>, rx: &std::sync::mpsc::Receiver<Ev
         match ev {
             Evt::Progress(done, total, rate) => {
                 let _ = env.call_method(
-                    cb,
+                    cb.clone(),
                     "onProgress",
                     "(IJJJ)V",
                     &[
@@ -267,14 +272,14 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxConnect<'local>(
     let cfg = config_from(chunk_bytes, compression);
 
     let join = runtime().spawn(async move {
-        let (addr, fp) = match P2PSession::discover_one_peer(port as u16, &identity(), device_id()).await
-        {
-            Ok(pair) => pair,
-            Err(e) => {
-                let _ = tx.send(Evt::Done(Err(e.to_string())));
-                return;
-            }
-        };
+        let (addr, fp) =
+            match P2PSession::discover_one_peer(port as u16, &identity(), device_id()).await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            };
         let mut session = match P2PSession::connect(addr, fp, identity(), device_id(), cfg).await {
             Ok(s) => s,
             Err(e) => {
@@ -322,33 +327,28 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxPairRendezvous<'loc
     let (tx, rx) = std::sync::mpsc::channel();
     let cfg = config_from(1024 * 1024, compression);
 
-    let join = runtime().spawn(async move {
-        let rv = match P2PSession::parse_peer_addr(&server, DEFAULT_RENDEZVOUS_PORT) {
-            Ok(addr) => addr,
-            Err(e) => {
-                let _ = tx.send(Evt::Done(Err(e.to_string())));
-                return;
-            }
-        };
-        let mut session = match P2PSession::from_rendezvous(
-            rv,
-            code,
-            identity(),
-            device_id(),
-            cfg,
-            false,
-        )
-        .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                let _ = tx.send(Evt::Done(Err(e.to_string())));
-                return;
-            }
-        };
-        let res = receive_into(&mut session, &dir, tx.clone()).await;
-        let _ = tx.send(Evt::Done(res));
-    });
+    let join =
+        runtime().spawn(async move {
+            let rv = match P2PSession::parse_peer_addr(&server, DEFAULT_RENDEZVOUS_PORT) {
+                Ok(addr) => addr,
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            };
+            let mut session =
+                match P2PSession::from_rendezvous(rv, code, identity(), device_id(), cfg, false)
+                    .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = tx.send(Evt::Done(Err(e.to_string())));
+                        return;
+                    }
+                };
+            let res = receive_into(&mut session, &dir, tx.clone()).await;
+            let _ = tx.send(Evt::Done(res));
+        });
     track(join.abort_handle());
 
     let out = drain(env, cb, &rx);
