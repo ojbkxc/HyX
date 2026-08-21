@@ -1,0 +1,55 @@
+<resources>
+    <string name="app_name">HyX</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_transfer">Transfer</string>
+    <string name="nav_devices">Devices</string>
+    <string name="nav_history">History</string>
+
+    <!-- Transfer -->
+    <string name="tab_transfer_title">Fast Transfer</string>
+    <string name="mode_send">Send</string>
+    <string name="mode_receive">Receive</string>
+    <string name="pair_code">Pairing Code</string>
+    <string name="pair_scan">Scan</string>
+    <string name="pair_lan">LAN Discovery</string>
+    <string name="send_files_label">Pick a file to send</string>
+    <string name="start_receive">Start Receiving</string>
+    <string name="cancel">Cancel</string>
+    <string name="engine">Engine</string>
+    <string name="engine_compression">Streaming compression (zstd, adaptive)</string>
+    <string name="engine_aggregation">Stream aggregation (batch write)</string>
+
+    <!-- Progress -->
+    <string name="speed">Speed</string>
+    <string name="remaining">Remaining</string>
+    <string name="elapsed">Elapsed</string>
+    <string name="transferred">Transferred</string>
+    <string name="total_size">Total Size</string>
+
+    <!-- Status -->
+    <string name="status_idle">Idle</string>
+    <string name="status_pairing">Waiting for pairing…</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_transferring">Transferring</string>
+    <string name="status_completed">Completed</string>
+    <string name="status_failed">Failed</string>
+    <string name="status_cancelled">Cancelled</string>
+    <string name="status_done">Completed</string>
+    <string name="status_cancel">Cancelled</string>
+    <string name="status_interrupted">Interrupted</string>
+
+    <!-- Devices -->
+    <string name="tab_devices_title">Devices</string>
+    <string name="no_devices">No devices found</string>
+    <string name="scanning_lan">Scanning LAN…</string>
+    <string name="devices_count">%1$d device(s)</string>
+    <string name="via_lan">LAN</string>
+    <string name="via_rendezvous">Pairing</string>
+    <string name="connected_via_pair">Paired via code</string>
+
+    <!-- History -->
+    <string name="tab_history_title">Transfer History</string>
+    <string name="no_history">No transfers yet</string>
+    <string name="history_count">%1$d record(s) · keep latest 20</string>
+</resources>

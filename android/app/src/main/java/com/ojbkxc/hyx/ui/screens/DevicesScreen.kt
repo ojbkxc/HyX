@@ -27,9 +27,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ojbkxc.hyx.R
 import com.ojbkxc.hyx.core.HyXCoreController
 import com.ojbkxc.hyx.ui.components.StatusBadge
 import com.ojbkxc.hyx.ui.model.Device
@@ -42,7 +44,7 @@ fun DevicesScreen(controller: HyXCoreController) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
-            "设备",
+            stringResource(R.string.tab_devices_title),
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground
         )
@@ -53,7 +55,8 @@ fun DevicesScreen(controller: HyXCoreController) {
                 Spacer(Modifier.size(8.dp))
             }
             Text(
-                if (scanning) "正在扫描局域网…" else "共 ${devices.size} 台设备",
+                if (scanning) stringResource(R.string.scanning_lan)
+                else stringResource(R.string.devices_count, devices.size),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -68,7 +71,7 @@ fun DevicesScreen(controller: HyXCoreController) {
             ) {
                 Icon(Icons.Outlined.DeviceHub, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
-                Text("尚未发现设备", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.no_devices), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -105,17 +108,22 @@ private fun DeviceCard(device: Device, onClick: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(device.name, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
                     StatusBadge(
-                        text = device.via.name,
+                        text = stringResource(deviceViaLabelRes(device.via)),
                         active = device.connected
                     )
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    device.address ?: "经配对码连接",
+                    device.address ?: stringResource(R.string.connected_via_pair),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
     }
+}
+
+private fun deviceViaLabelRes(via: Device.Via): Int = when (via) {
+    Device.Via.Lan -> R.string.via_lan
+    Device.Via.Rendezvous -> R.string.via_rendezvous
 }

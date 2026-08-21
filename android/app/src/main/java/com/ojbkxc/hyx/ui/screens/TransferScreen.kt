@@ -36,7 +36,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import androidx.documentfile.provider.DocumentFile
+import com.ojbkxc.hyx.R
 import com.ojbkxc.hyx.ui.components.MetricCardRow
 import com.ojbkxc.hyx.ui.components.RingProgress
 import com.ojbkxc.hyx.ui.components.StatusBadge
@@ -78,7 +80,7 @@ fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            "极速传输",
+            stringResource(R.string.tab_transfer_title),
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.align(Alignment.Start)
@@ -92,12 +94,12 @@ fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
                 selected = direction == TransferDirection.Send,
                 onClick = { if (!active) controller.onDirectionChange(TransferDirection.Send) },
                 shape = SegmentedButtonDefaults.itemShape(0, 2)
-            ) { Text("发送") }
+            ) { Text(stringResource(R.string.mode_send)) }
             SegmentedButton(
                 selected = direction == TransferDirection.Receive,
                 onClick = { if (!active) controller.onDirectionChange(TransferDirection.Receive) },
                 shape = SegmentedButtonDefaults.itemShape(1, 2)
-            ) { Text("接收") }
+            ) { Text(stringResource(R.string.mode_receive)) }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -109,7 +111,7 @@ fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("配对码", fontSize = 12.sp,
+                    Text(stringResource(R.string.pair_code), fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(6.dp))
                     Text(
@@ -129,7 +131,8 @@ fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
         } else {
             TransferIdlePanel(
                 hasPairing = pairingCode != null,
-                primaryLabel = if (sending) "选择文件并发给设备" else "开始接收",
+                primaryLabel = if (sending) stringResource(R.string.send_files_label)
+                else stringResource(R.string.start_receive),
                 onPrimary = {
                     if (sending) pickFile.launch(arrayOf("*/*")) else controller.startTransfer()
                 },
@@ -144,7 +147,7 @@ fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
         EngineSettingsCard(settings = settings, onChange = { updated -> controller.updateSettings { updated } })
 
         Spacer(Modifier.height(8.dp))
-        StatusBadge(text = statusText(status), active = active)
+        StatusBadge(text = stringResource(statusTextRes(status)), active = active)
         Spacer(Modifier.height(4.dp))
     }
 }
@@ -170,14 +173,14 @@ private fun TransferringPanel(
         Spacer(Modifier.height(20.dp))
         MetricCardRow(
             listOf(
-                "总大小" to formatBytes(progress.totalBytes),
-                "已传输" to formatBytes(progress.transferredBytes),
-                "速度" to formatSpeed(progress.speedBps),
-                "剩余" to formatDuration(etaMs(progress))
+                stringResource(R.string.total_size) to formatBytes(progress.totalBytes),
+                stringResource(R.string.transferred) to formatBytes(progress.transferredBytes),
+                stringResource(R.string.speed) to formatSpeed(progress.speedBps),
+                stringResource(R.string.remaining) to formatDuration(etaMs(progress))
             )
         )
         Spacer(Modifier.height(20.dp))
-        OutlinedButton(onClick = onCancel) { Text("取消") }
+        OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
     }
 }
 
@@ -204,16 +207,16 @@ private fun TransferIdlePanel(
             OutlinedButton(
                 onClick = onPair,
                 modifier = Modifier.weight(1f)
-            ) { Text("配对码") }
+            ) { Text(stringResource(R.string.pair_code)) }
             OutlinedButton(
                 onClick = onScan,
                 modifier = Modifier.weight(1f)
-            ) { Text("扫码") }
+            ) { Text(stringResource(R.string.pair_scan)) }
         }
         OutlinedButton(
             onClick = onStartDiscovery,
             modifier = Modifier.fillMaxWidth()
-        ) { Text("局域网发现", color = MaterialTheme.colorScheme.primary) }
+        ) { Text(stringResource(R.string.pair_lan), color = MaterialTheme.colorScheme.primary) }
     }
 }
 
@@ -228,12 +231,12 @@ private fun EngineSettingsCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("引擎", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.engine), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
-            SettingSwitch("流式压缩（zstd，自适应）", settings.compression) {
+            SettingSwitch(stringResource(R.string.engine_compression), settings.compression) {
                 onChange(settings.copy(compression = it))
             }
-            SettingSwitch("连续流聚合（一次写整批）", settings.aggregation) {
+            SettingSwitch(stringResource(R.string.engine_aggregation), settings.aggregation) {
                 onChange(settings.copy(aggregation = it))
             }
         }
@@ -251,14 +254,14 @@ private fun SettingSwitch(label: String, checked: Boolean, onToggle: (Boolean) -
     }
 }
 
-private fun statusText(status: TransferStatus): String = when (status) {
-    TransferStatus.Idle -> "待命"
-    TransferStatus.Pairing -> "等待配对…"
-    TransferStatus.Connecting -> "建立连接…"
-    TransferStatus.Transferring -> "传输中"
-    TransferStatus.Completed -> "已完成"
-    TransferStatus.Failed -> "失败"
-    TransferStatus.Cancelled -> "已取消"
+private fun statusTextRes(status: TransferStatus): Int = when (status) {
+    TransferStatus.Idle -> R.string.status_idle
+    TransferStatus.Pairing -> R.string.status_pairing
+    TransferStatus.Connecting -> R.string.status_connecting
+    TransferStatus.Transferring -> R.string.status_transferring
+    TransferStatus.Completed -> R.string.status_completed
+    TransferStatus.Failed -> R.string.status_failed
+    TransferStatus.Cancelled -> R.string.status_cancelled
 }
 
 /** Copy a content URI into the app cache so the Rust kernel can read it by path. */

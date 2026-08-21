@@ -26,9 +26,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ojbkxc.hyx.R
 import com.ojbkxc.hyx.core.HyXCoreController
 import com.ojbkxc.hyx.ui.components.StatusBadge
 import com.ojbkxc.hyx.ui.components.formatBytes
@@ -49,13 +51,13 @@ fun HistoryScreen(controller: HyXCoreController) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
-            "传输历史",
+            stringResource(R.string.tab_history_title),
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "共 ${history.size} 条记录 · 保留最近 20 条",
+            stringResource(R.string.history_count, history.size),
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -69,7 +71,7 @@ fun HistoryScreen(controller: HyXCoreController) {
             ) {
                 Icon(Icons.Outlined.History, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
-                Text("暂无传输记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.no_history), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -118,7 +120,7 @@ private fun HistoryCard(record: HistoryRecord) {
                         maxLines = 1,
                         modifier = Modifier.weight(1f)
                     )
-                    StatusBadge(text = statusLabel(record.status), active = record.status == TransferStatus.Completed)
+                    StatusBadge(text = stringResource(historyStatusLabelRes(record.status)), active = record.status == TransferStatus.Completed)
                 }
                 Spacer(Modifier.height(3.dp))
                 Text(
@@ -137,9 +139,9 @@ private fun HistoryCard(record: HistoryRecord) {
     }
 }
 
-private fun statusLabel(s: TransferStatus) = when (s) {
-    TransferStatus.Completed -> "完成"
-    TransferStatus.Failed -> "失败"
-    TransferStatus.Cancelled -> "取消"
-    else -> "中断"
+private fun historyStatusLabelRes(s: TransferStatus): Int = when (s) {
+    TransferStatus.Completed -> R.string.status_done
+    TransferStatus.Failed -> R.string.status_failed
+    TransferStatus.Cancelled -> R.string.status_cancel
+    else -> R.string.status_interrupted
 }

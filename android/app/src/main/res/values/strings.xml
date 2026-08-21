@@ -11,12 +11,14 @@
     <string name="mode_send">发送</string>
     <string name="mode_receive">接收</string>
     <string name="pair_code">配对码</string>
-    <string name="pair_scan">扫码配对</string>
+    <string name="pair_scan">扫码</string>
     <string name="pair_lan">局域网发现</string>
-    <string name="select_files">选择文件</string>
-    <string name="select_folder">选择文件夹</string>
+    <string name="send_files_label">选择文件并发给设备</string>
+    <string name="start_receive">开始接收</string>
     <string name="cancel">取消</string>
-    <string name="start_transfer">开始传输</string>
+    <string name="engine">引擎</string>
+    <string name="engine_compression">流式压缩（zstd，自适应）</string>
+    <string name="engine_aggregation">连续流聚合（一次写整批）</string>
 
     <!-- Progress -->
     <string name="speed">速度</string>
@@ -25,12 +27,29 @@
     <string name="transferred">已传输</string>
     <string name="total_size">总大小</string>
 
+    <!-- Status -->
+    <string name="status_idle">待命</string>
+    <string name="status_pairing">等待配对…</string>
+    <string name="status_connecting">建立连接…</string>
+    <string name="status_transferring">传输中</string>
+    <string name="status_completed">已完成</string>
+    <string name="status_failed">失败</string>
+    <string name="status_cancelled">已取消</string>
+    <string name="status_done">完成</string>
+    <string name="status_cancel">取消</string>
+    <string name="status_interrupted">中断</string>
+
     <!-- Devices -->
     <string name="tab_devices_title">设备</string>
     <string name="no_devices">尚未发现设备</string>
-    <string name="waiting_pair">等待配对…</string>
+    <string name="scanning_lan">正在扫描局域网…</string>
+    <string name="devices_count">共 %1$d 台设备</string>
+    <string name="via_lan">局域网</string>
+    <string name="via_rendezvous">配对码</string>
+    <string name="connected_via_pair">经配对码连接</string>
 
     <!-- History -->
     <string name="tab_history_title">传输历史</string>
     <string name="no_history">暂无传输记录</string>
+    <string name="history_count">共 %1$d 条记录 · 保留最近 20 条</string>
 </resources>
