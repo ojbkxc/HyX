@@ -15,8 +15,9 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use hyx_core::discovery::DiscoveryManager;
 use hyx_core::identity::Identity;
 use hyx_core::progress::{ProgressCallback, ProgressState};
 use hyx_core::protocol::ConfigMessage;
@@ -143,6 +144,41 @@ async fn send_path(
         .await
         .map(|_| String::new()) // "" == success
         .map_err(|e| e.to_string())
+}
+
+/// Real LAN UDP-beacon discovery: broadcast + listen for ~2.5 s, then return
+/// one line per peer as `"name\tip:port"` (empty string if none found). The
+/// 设备 tab renders these lines into [Device] cards. No `JNIEnv` crosses any
+/// `await` point — the whole scan is awaited via `runtime().block_on`.
+async fn discover_peers(port: u16) -> String {
+    let name = format!("hyx-{}", &device_id().to_string()[..6]);
+    let manager = match DiscoveryManager::new(
+        name,
+        port,
+        identity().fingerprint(),
+        Duration::from_secs(60),
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("discovery manager failed: {e}");
+            return String::new();
+        }
+    };
+    let mgr = Arc::clone(&manager);
+    let handle = tokio::spawn(async move {
+        let _ = mgr.start().await;
+    });
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    handle.abort();
+    manager
+        .get_peers()
+        .await
+        .into_iter()
+        .map(|p| format!("{}\t{}", p.device_name, p.socket_addr()))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Synchronously drain the event channel, calling the Kotlin callback as events
@@ -374,4 +410,16 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxCancel<'local>(
         h.abort();
     }
     std::ptr::null_mut()
+}
+
+/// `String hyxDiscover(int port)` — real LAN discovery. Returns newline-joined
+/// `"name\tip:port"` lines ("" if none found).
+#[no_mangle]
+pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxDiscover<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+    port: jint,
+) -> jobject {
+    let result = runtime().block_on(discover_peers(if port > 0 { port as u16 } else { 14567 }));
+    new_jstring(&mut env, &result)
 }
