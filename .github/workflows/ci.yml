@@ -55,9 +55,12 @@ jobs:
       - name: Setup Android SDK + NDK
         uses: android-actions/setup-android@v3
         with:
-          sdk-version: 35
-          build-tools-version: "35.0.0"
-          ndk-version: "27.2.12479018"
+          packages: >-
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
+            ndk;27.2.12479018
+          accept-android-sdk-licenses: true
 
       - name: Setup Rust (Android targets)
         uses: dtolnay/rust-toolchain@stable
