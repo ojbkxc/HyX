@@ -144,8 +144,7 @@ impl P2PSession {
         let handshake = if we_initiate {
             tokio::time::timeout(
                 HANDSHAKE_TIMEOUT,
-                HandshakeClient::new(device_id, &identity)
-                    .perform_handshake(&mut connection, config),
+                HandshakeClient::new(device_id, &identity).perform_handshake(&mut connection, config),
             )
             .await
             .map_err(|_| Error::Timeout)??
@@ -238,12 +237,13 @@ impl P2PSession {
     /// flow needs.
     pub async fn resolve_peer_addr(addr_str: &str, port: u16) -> Result<SocketAddr> {
         let with_port = crate::with_default_port(addr_str, port);
-        let mut hosts = tokio::net::lookup_host(&with_port)
+        tokio::net::lookup_host(&with_port)
             .await
-            .map_err(Error::Network)?;
-        hosts
+            .map_err(Error::Network)?
             .next()
-            .ok_or_else(|| Error::Protocol(format!("could not resolve peer address '{addr_str}'")))
+            .ok_or_else(|| {
+                Error::Protocol(format!("could not resolve peer address '{addr_str}'"))
+            })
     }
 
     /// Run LAN UDP-beacon discovery for up to ~3 s and return a peer's

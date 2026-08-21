@@ -17,7 +17,6 @@ use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info};
-use uuid::Uuid;
 
 use crate::error::{Error, Result};
 
