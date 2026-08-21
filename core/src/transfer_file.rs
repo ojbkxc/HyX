@@ -399,6 +399,14 @@ pub struct ChunkWriter {
     file: File,
     path: PathBuf,
     chunk_size: usize,
+    /// 引擎A：写回时就地累计 SHA-256，有序快路径下 finalize 免整文件重读。
+    hasher: Sha256,
+    /// 已连续写入的前缀长度（偏移）；用于判定写回是否有序。
+    next_expected: u64,
+    /// 出现缺块/乱序后，finalize 需回退整文件重读。
+    out_of_order: bool,
+    /// 目标文件总字节数，用于判断前缀是否写满。
+    file_size: u64,
 }
 
 impl ChunkWriter {
@@ -444,19 +452,31 @@ impl ChunkWriter {
             file,
             path: path.to_path_buf(),
             chunk_size,
+            hasher: Sha256::new(),
+            next_expected: 0,
+            out_of_order: false,
+            file_size: expected_file_size,
         })
     }
 
-    /// Write a chunk at its absolute offset and `sync_data` so the bytes
-    /// are durable before we report the chunk complete to the resume
-    /// state. Without this, a power loss between `write_chunk` returning
-    /// and `finalize().sync_all()` would leave the resume state lying
-    /// about which chunks the receiver has (finding 1.8).
+    /// Write a chunk at its absolute offset. 引擎A：不再逐块 `sync_data`
+    /// （与 FlyingCarpet 一致，靠 `finalize().sync_all()` 一次性落盘），
+    /// 并在写回有序时就地累计 SHA-256，令 finalize 无需整文件重读。
     pub async fn write_chunk(&mut self, index: u64, data: &[u8]) -> Result<()> {
         let offset = index * self.chunk_size as u64;
         self.file.seek(SeekFrom::Start(offset)).await?;
         self.file.write_all(data).await?;
-        self.file.sync_data().await?;
+        if !self.out_of_order {
+            if offset == self.next_expected {
+                self.hasher.update(data);
+                self.next_expected = self.next_expected.saturating_add(data.len() as u64);
+            } else if offset < self.next_expected {
+                // 重复块（resume 重发已收块）：哈希已计，忽略。
+            } else {
+                // 缺块/乱序：后续回退整读。
+                self.out_of_order = true;
+            }
+        }
         Ok(())
     }
 
@@ -466,8 +486,9 @@ impl ChunkWriter {
         PathBuf::from(p)
     }
 
-    /// Sync to disk, rename `.partial` → final path, then re-read the
-    /// finalized file to compute its SHA-256.
+    /// Sync once, rename `.partial` → final path, compute SHA-256. 引擎A：
+    /// 快路径（有序写满）直接取增量哈希省去整文件重读；仅当发生乱序/
+    /// 缺块（如续传）时回退整读，保证结果一致。
     pub async fn finalize(self) -> Result<[u8; 32]> {
         self.file.sync_all().await?;
         let partial_path = self.partial_path();
@@ -475,10 +496,15 @@ impl ChunkWriter {
         drop(self.file);
         tokio::fs::rename(&partial_path, &final_path).await?;
 
+        if !self.out_of_order && self.next_expected == self.file_size {
+            info!("File finalized (incremental hash): {:?}", final_path);
+            return Ok(self.hasher.finalize().into());
+        }
+
         let mut hasher = Sha256::new();
         let mut f = File::open(&final_path).await?;
         // 1 MiB buffer amortises syscall overhead on the post-transfer
-        // re-read (the limiting factor here is `read` cost, not CPU).
+        // re-read; only reachable when the write-back was out of order.
         let mut buf = vec![0u8; 1024 * 1024];
         loop {
             let n = f.read(&mut buf).await?;
@@ -487,7 +513,7 @@ impl ChunkWriter {
             }
             hasher.update(&buf[..n]);
         }
-        info!("File finalized: {:?}", final_path);
+        info!("File finalized (re-read hash): {:?}", final_path);
         Ok(hasher.finalize().into())
     }
 }
