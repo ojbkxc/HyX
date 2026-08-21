@@ -15,6 +15,12 @@ categories = ["command-line-utilities", "network-programming"]
 [workspace]
 members = ["core", "cli", "rendezvous", "mobile"]
 
+# 吸收 quiche-bbr2：将 quinn-proto 替换为本地增强副本，其默认拥塞控制
+# 已升级为 BBR v2（见 vendor/quinn-proto/src/config/transport.rs），
+# 使引擎每一条 QUIC 连接默认即采用 BBR v2。
+[patch.crates-io]
+quinn-proto = { path = "vendor/quinn-proto" }
+
 [dependencies]
 hyx-core = { path = "./core" }
 hyx-cli = { path = "./cli", optional = true }
