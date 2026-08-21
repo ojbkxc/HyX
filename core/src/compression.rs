@@ -191,6 +191,26 @@ impl Decompressor {
     pub fn decompress(&self, data: &[u8]) -> Result<Vec<u8>> {
         decompress(data)
     }
+
+    /// Decompress with a hard cap on output size. Reads through a streaming
+    /// zstd decoder bounded by `max_out` so a tiny on-wire payload cannot
+    /// expand into unbounded memory (decompression bomb).
+    pub fn decompress_limited(&self, data: &[u8], max_out: usize) -> Result<Vec<u8>> {
+        use std::io::Read;
+        let mut decoder = zstd::stream::read::Decoder::new(data)
+            .map_err(|e| Error::Decompression(e.to_string()))?;
+        let mut out = Vec::new();
+        decoder
+            .take(max_out as u64 + 1)
+            .read_to_end(&mut out)
+            .map_err(|e| Error::Decompression(e.to_string()))?;
+        if out.len() > max_out {
+            return Err(Error::Decompression(format!(
+                "decompressed data exceeds limit of {max_out} bytes"
+            )));
+        }
+        Ok(out)
+    }
 }
 
 impl Default for Decompressor {

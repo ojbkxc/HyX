@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use hyx_core::discovery::DiscoveryManager;
-use hyx_core::identity::Identity;
+use hyx_core::identity::{device_id_from_fingerprint, Identity};
 use hyx_core::progress::{ProgressCallback, ProgressState};
 use hyx_core::protocol::ConfigMessage;
 use hyx_core::reconnect::ReconnectConfig;
@@ -64,10 +64,12 @@ fn identity() -> Arc<Identity> {
         .clone()
 }
 
-/// Fresh per-process device id; used to make rendezvous initiator/responder split deterministic.
+/// Stable per-device id derived from the cert fingerprint, so a peer's
+/// identity survives app restarts. Used to make rendezvous initiator/
+/// responder split deterministic and to identify us in discovery beacons.
 static DEVICE_ID: OnceLock<Uuid> = OnceLock::new();
 fn device_id() -> Uuid {
-    *DEVICE_ID.get_or_init(Uuid::new_v4)
+    *DEVICE_ID.get_or_init(|| device_id_from_fingerprint(&identity().fingerprint()))
 }
 
 /// Handle of the in-flight background transfer, so `hyxCancel` can abort it.
@@ -169,6 +171,7 @@ async fn discover_peers(port: u16) -> String {
         name,
         port,
         identity().fingerprint(),
+        device_id(),
         Duration::from_secs(60),
     )
     .await
@@ -179,15 +182,14 @@ async fn discover_peers(port: u16) -> String {
             return String::new();
         }
     };
-    let mgr = Arc::clone(&manager);
-    let handle = tokio::spawn(async move {
-        let _ = mgr.start().await;
-    });
+    if let Err(e) = manager.start().await {
+        tracing::warn!("discovery start failed: {e}");
+        return String::new();
+    }
     tokio::time::sleep(Duration::from_millis(2500)).await;
-    handle.abort();
-    manager
-        .get_peers()
-        .await
+    let peers = manager.get_peers().await;
+    manager.stop();
+    peers
         .into_iter()
         .map(|p| format!("{}\t{}", p.device_name, p.socket_addr()))
         .collect::<Vec<_>>()
@@ -220,7 +222,10 @@ fn drain(mut env: JNIEnv<'_>, cb: JObject<'_>, rx: &std::sync::mpsc::Receiver<Ev
             }
         }
     }
-    std::ptr::null_mut()
+    // All senders dropped without a Done event: the transfer was aborted
+    // (hyxCancel) or the task panicked. Return a non-empty error so the
+    // Kotlin side treats it as a failure instead of a silent success.
+    new_jstring(&mut env, "Transfer cancelled")
 }
 
 fn new_jstring(env: &mut JNIEnv<'_>, s: &str) -> jobject {
@@ -255,7 +260,8 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxCreateDevice<'local
 
 /// `String hyxStartListener(int port, int chunkBytes, long fsyncEveryBytes,
 /// int compression, int aggregation, String saveDir, ProgressCallback cb)` —
-/// bind + accept + receive into `saveDir`.
+/// bind + accept + receive into `saveDir`. While listening, also broadcasts
+/// LAN beacons so a sender's discovery scan can find this device.
 #[no_mangle]
 pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'local>(
     mut env: JNIEnv<'local>,
@@ -276,14 +282,40 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'loca
     let (tx, rx) = std::sync::mpsc::channel();
 
     let join = runtime().spawn(async move {
+        // Broadcast beacons for the whole listen window so senders can
+        // discover us. Best-effort: a bind failure (e.g. another instance
+        // already owns the discovery port) must not block receiving.
+        let discovery = Arc::new(
+            DiscoveryManager::new(
+                format!("hyx-{}", &device_id().to_string()[..6]),
+                port as u16,
+                identity().fingerprint(),
+                device_id(),
+                Duration::from_secs(60),
+            )
+            .await
+            .ok(),
+        );
+        if let Some(d) = &discovery {
+            if let Err(e) = d.start().await {
+                tracing::warn!("discovery start failed: {e}");
+            }
+        }
+
         let mut session = match P2PSession::accept(bind_addr(port), identity(), device_id()).await {
             Ok(s) => s,
             Err(e) => {
+                if let Some(d) = &discovery {
+                    d.stop();
+                }
                 let _ = tx.send(Evt::Done(Err(e.to_string())));
                 return;
             }
         };
         let res = receive_into(&mut session, &dir, tx.clone()).await;
+        if let Some(d) = &discovery {
+            d.stop();
+        }
         let _ = tx.send(Evt::Done(res));
     });
     track(join.abort_handle());
@@ -295,7 +327,8 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'loca
 
 /// `String hyxConnect(String peerAddress, String filePath, int chunkBytes,
 /// long fsyncEveryBytes, int compression, int aggregation, int port,
-/// ProgressCallback cb)` — LAN-discover the peer, connect, send `filePath`.
+/// ProgressCallback cb)` — connect to `peerAddress` (LAN-discovering it for
+/// the cert fingerprint when the address is empty), then send `filePath`.
 #[no_mangle]
 pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxConnect<'local>(
     mut env: JNIEnv<'local>,
@@ -313,7 +346,7 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxConnect<'local>(
         .get_string(&file_path)
         .map(|c| c.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let _peer = env
+    let peer = env
         .get_string(&peer_address)
         .map(|c| c.to_string_lossy().into_owned())
         .unwrap_or_default();
@@ -322,14 +355,35 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxConnect<'local>(
     let cfg = config_from(chunk_bytes, compression);
 
     let join = runtime().spawn(async move {
-        let (addr, fp) =
+        // A specific address (from the 设备 tab) wins; otherwise fall back
+        // to discovering whatever peer is on the LAN. Either way we get the
+        // peer's cert fingerprint from its beacon so TLS can pin it.
+        let (addr, fp) = if !peer.is_empty() {
+            let target = match P2PSession::resolve_peer_addr(&peer, port as u16).await {
+                Ok(a) => a,
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            };
+            match P2PSession::discover_peer(port as u16, &identity(), device_id(), Some(target))
+                .await
+            {
+                Ok(pair) => pair,
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            }
+        } else {
             match P2PSession::discover_one_peer(port as u16, &identity(), device_id()).await {
                 Ok(pair) => pair,
                 Err(e) => {
                     let _ = tx.send(Evt::Done(Err(e.to_string())));
                     return;
                 }
-            };
+            }
+        };
         let mut session = match P2PSession::connect(addr, fp, identity(), device_id(), cfg).await {
             Ok(s) => s,
             Err(e) => {
@@ -379,14 +433,16 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxPairRendezvous<'loc
 
     let join =
         runtime().spawn(async move {
-            let rv = match P2PSession::parse_peer_addr(
+            let rv = match P2PSession::resolve_peer_addr(
                 &server,
                 if port > 0 {
                     port as u16
                 } else {
                     DEFAULT_RENDEZVOUS_PORT
                 },
-            ) {
+            )
+            .await
+            {
                 Ok(addr) => addr,
                 Err(e) => {
                     let _ = tx.send(Evt::Done(Err(e.to_string())));

@@ -36,11 +36,14 @@ pub async fn handle_history(
         records.retain(|r| r.direction == dir_filter);
     }
 
-    // Filter by status
-    if completed {
-        records.retain(|r| r.status == TransferStatus::Completed);
-    } else if failed {
-        records.retain(|r| r.status == TransferStatus::Failed);
+    // Filter by status. When both --completed and --failed are supplied,
+    // retain records matching either status (union), instead of silently
+    // ignoring --failed via the previous `else if` branch.
+    if completed || failed {
+        records.retain(|r| {
+            (completed && r.status == TransferStatus::Completed)
+                || (failed && r.status == TransferStatus::Failed)
+        });
     }
 
     // Sort by start time (most recent first)

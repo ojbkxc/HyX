@@ -10,7 +10,7 @@ use tracing::{info, warn};
 use hyx_core::{
     error::Error,
     history::{record_transfer, TransferDirection, TransferRecord},
-    identity::Identity,
+    identity::{device_id_from_fingerprint, Identity},
     progress::ProgressState,
     protocol::{ConfigMessage, TransferInfo},
     session::P2PSession,
@@ -71,7 +71,7 @@ async fn pair_or_listen(
         session_params,
         "server",
         identity.clone(),
-        Uuid::new_v4(),
+        device_id_from_fingerprint(&identity.fingerprint()),
         Some(ConfigMessage::default()),
     )
     .await
@@ -157,7 +157,11 @@ async fn receive_one(
         }
         Err(e) => {
             record.fail(e.to_string());
-            let _ = record_transfer(record, None).await;
+            // Match send.rs: surface history-recording failures rather
+            // than silently dropping them with `let _`.
+            if let Err(rec_err) = record_transfer(record, None).await {
+                warn!("Failed to record transfer history: {}", rec_err);
+            }
             ReceiveOutcome::Fatal(e.into())
         }
     }
@@ -190,7 +194,7 @@ async fn recover_after_disconnect(
             session_params,
             "server",
             identity.clone(),
-            Uuid::new_v4(),
+            device_id_from_fingerprint(&identity.fingerprint()),
             Some(ConfigMessage::default()),
         )
         .await?;

@@ -8,8 +8,11 @@ use tokio::signal;
 use tracing::{debug, info, warn};
 
 use hyx_core::{
-    identity::Identity, progress::ProgressState, reconnect::ReconnectConfig,
-    transfer_folder::FolderTransferState, Uuid,
+    identity::{device_id_from_fingerprint, Identity},
+    progress::ProgressState,
+    reconnect::ReconnectConfig,
+    transfer_folder::FolderTransferState,
+    Uuid,
 };
 
 use crate::cli::SessionParams;
@@ -58,7 +61,7 @@ pub async fn handle_resume(
         &session_params,
         "client",
         identity,
-        Uuid::new_v4(),
+        device_id_from_fingerprint(&identity.fingerprint()),
         Some(state.config.clone()),
     )
     .await?;

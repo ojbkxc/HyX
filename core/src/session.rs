@@ -27,6 +27,12 @@ use crate::transfer_folder::{
 };
 use crate::traversal::{establish_via_rendezvous, RendezvousParams, DEFAULT_STUN_SERVERS};
 
+/// Upper bound on how long an application handshake may take. A peer that
+/// connects but never speaks (or speaks garbage) must not hang the caller
+/// forever — the QUIC handshake itself has its own timeout, but the
+/// application HELLO/CONFIG exchange after it does not.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// An established connection plus the parameters needed to resurrect it.
 pub struct P2PSession {
     endpoint: QuicEndpoint,
@@ -64,9 +70,12 @@ impl P2PSession {
         trace!("QUIC connection established");
 
         let handshake_client = HandshakeClient::new(device_id, &identity);
-        let handshake = handshake_client
-            .perform_handshake(&mut connection, config)
-            .await?;
+        let handshake = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            handshake_client.perform_handshake(&mut connection, config),
+        )
+        .await
+        .map_err(|_| Error::Timeout)??;
 
         debug!(
             "Session established as initiator (peer: {})",
@@ -123,18 +132,29 @@ impl P2PSession {
         } = session;
 
         // Deterministic initiator/responder split: compare device IDs.
-        // Fresh per-process UUIDs are always unique even when both peers
-        // run on the same machine sharing an identity; fingerprints would
-        // alias when a user pairs themselves.
-        let we_initiate = device_id < peer_device_id;
-        let handshake = if we_initiate {
-            HandshakeClient::new(device_id, &identity)
-                .perform_handshake(&mut connection, config)
-                .await?
+        // Fingerprint-derived device IDs are stable across restarts; when
+        // two peers share an identity (local test scenario) the IDs are
+        // equal, so fall back to a random tiebreak — a wrong guess surfaces
+        // as a handshake timeout the caller can retry, never a hang.
+        let we_initiate = if device_id != peer_device_id {
+            device_id < peer_device_id
         } else {
-            HandshakeServer::new(device_id, &identity)
-                .perform_handshake(&mut connection)
-                .await?
+            Uuid::new_v4() < Uuid::new_v4()
+        };
+        let handshake = if we_initiate {
+            tokio::time::timeout(
+                HANDSHAKE_TIMEOUT,
+                HandshakeClient::new(device_id, &identity).perform_handshake(&mut connection, config),
+            )
+            .await
+            .map_err(|_| Error::Timeout)??
+        } else {
+            tokio::time::timeout(
+                HANDSHAKE_TIMEOUT,
+                HandshakeServer::new(device_id, &identity).perform_handshake(&mut connection),
+            )
+            .await
+            .map_err(|_| Error::Timeout)??
         };
 
         info!(
@@ -173,7 +193,12 @@ impl P2PSession {
         trace!("QUIC connection accepted from {}", connection.peer_addr());
 
         let handshake_server = HandshakeServer::new(device_id, &identity);
-        let handshake = handshake_server.perform_handshake(&mut connection).await?;
+        let handshake = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            handshake_server.perform_handshake(&mut connection),
+        )
+        .await
+        .map_err(|_| Error::Timeout)??;
 
         debug!(
             "Session established as responder (peer: {})",
@@ -205,14 +230,33 @@ impl P2PSession {
         )))
     }
 
-    /// Run LAN UDP-beacon discovery for up to ~3 s and return the first
-    /// peer that announces itself, plus its cert fingerprint pulled from
-    /// the beacon. Used by direct-mode `--discover` and the GUI's
+    /// Resolve a user-supplied peer string (`host:port`, `hostname`, or bare
+    /// IP) to a `SocketAddr`, defaulting to `port` when none was given.
+    /// Unlike [`parse_peer_addr`](Self::parse_peer_addr) this also resolves
+    /// DNS hostnames (e.g. `rendezvous.hyx.dev`), which the mobile pairing
+    /// flow needs.
+    pub async fn resolve_peer_addr(addr_str: &str, port: u16) -> Result<SocketAddr> {
+        let with_port = crate::with_default_port(addr_str, port);
+        tokio::net::lookup_host(&with_port)
+            .await
+            .map_err(Error::Network)?
+            .next()
+            .ok_or_else(|| {
+                Error::Protocol(format!("could not resolve peer address '{addr_str}'"))
+            })
+    }
+
+    /// Run LAN UDP-beacon discovery for up to ~3 s and return a peer's
+    /// address + cert fingerprint. When `target` is `Some`, only a peer
+    /// whose `socket_addr()` matches is returned (used by the mobile sender
+    /// that already picked a device from the UI); otherwise the first
+    /// discovered peer wins. Used by direct-mode `--discover` and the GUI's
     /// "discover toggle".
-    pub async fn discover_one_peer(
+    pub async fn discover_peer(
         port: u16,
         identity: &Identity,
         device_id: Uuid,
+        target: Option<SocketAddr>,
     ) -> Result<(SocketAddr, Fingerprint)> {
         info!("Using peer discovery on port {}...", port);
         let device_name = format!("p2p-{}", &device_id.to_string()[..8]);
@@ -221,26 +265,49 @@ impl P2PSession {
                 device_name,
                 port,
                 identity.fingerprint(),
+                device_id,
                 Duration::from_secs(10),
             )
             .await?,
         );
-
-        let manager_clone = manager.clone();
-        let handle = tokio::spawn(async move {
-            let _ = manager_clone.start().await;
-        });
+        manager.start().await?;
 
         tokio::time::sleep(Duration::from_secs(3)).await;
         let peers = manager.get_peers().await;
-        handle.abort();
+        manager.stop();
 
-        let peer = peers.into_iter().next().ok_or_else(|| {
+        let peer = match target {
+            Some(t) => peers.into_iter().find(|p| p.socket_addr() == t),
+            None => peers.into_iter().next(),
+        }
+        .ok_or_else(|| {
             Error::Protocol(
                 "No peers discovered. Make sure a peer is running in server mode.".to_string(),
             )
         })?;
+
+        // TOFU: record the peer's fingerprint so a future identity change
+        // (the MITM signal) is visible. Best-effort — a full store is not
+        // required for the transfer to proceed.
+        if let Ok(known) = crate::known_peers::KnownPeers::open_default() {
+            let _ = known.verify_or_pin(
+                &peer.cert_fingerprint,
+                &peer.cert_fingerprint,
+                &peer.device_name,
+            );
+        }
+
         Ok((peer.socket_addr(), peer.cert_fingerprint))
+    }
+
+    /// Convenience wrapper for [`discover_peer`](Self::discover_peer) that
+    /// returns the first discovered peer.
+    pub async fn discover_one_peer(
+        port: u16,
+        identity: &Identity,
+        device_id: Uuid,
+    ) -> Result<(SocketAddr, Fingerprint)> {
+        Self::discover_peer(port, identity, device_id, None).await
     }
 
     // ------------------------------------------------------------------
@@ -427,9 +494,12 @@ impl P2PSession {
         );
         let mut new_connection = self.endpoint.accept().await?;
         let handshake_server = HandshakeServer::new(self.device_id, &self.identity);
-        let handshake = handshake_server
-            .perform_handshake(&mut new_connection)
-            .await?;
+        let handshake = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            handshake_server.perform_handshake(&mut new_connection),
+        )
+        .await
+        .map_err(|_| Error::Timeout)??;
         self.connection = new_connection;
         self.handshake = handshake;
         debug!(
@@ -458,9 +528,12 @@ impl P2PSession {
         let mut new_connection = endpoint.connect(peer_addr, peer_fp).await?;
 
         let handshake_client = HandshakeClient::new(self.device_id, &self.identity);
-        let handshake = handshake_client
-            .perform_handshake(&mut new_connection, self.handshake.config.clone())
-            .await?;
+        let handshake = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            handshake_client.perform_handshake(&mut new_connection, self.handshake.config.clone()),
+        )
+        .await
+        .map_err(|_| Error::Timeout)??;
 
         info!(
             "Reconnection successful (peer: {})",

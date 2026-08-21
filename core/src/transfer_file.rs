@@ -179,6 +179,12 @@ impl<'a> FileTransferSession<'a> {
 
         // Frames accumulate here and are flushed as one batch per uni-stream.
         let mut batch: Vec<u8> = Vec::with_capacity(64 * 1024);
+        // Chunk indices whose frames are buffered but not yet flushed to the
+        // wire. The completion callback (which drives resume state) must only
+        // fire after `flush_batch` succeeds — otherwise a disconnect between
+        // buffering and flushing would mark never-sent chunks as complete and
+        // poison the resume state file (finding: premature completion).
+        let mut pending_callbacks: Vec<u64> = Vec::new();
 
         for chunk_index in 0..total_chunks {
             if completed.contains(&chunk_index) {
@@ -208,6 +214,11 @@ impl<'a> FileTransferSession<'a> {
             if batch.len() as u64 + frame_len as u64 > BATCH_MAX_BYTES {
                 self.flush_batch(&batch).await?;
                 batch.clear();
+                for idx in pending_callbacks.drain(..) {
+                    if let Some(ref mut cb) = chunk_complete_callback {
+                        cb(idx);
+                    }
+                }
             }
 
             let header_start = batch.len();
@@ -224,9 +235,7 @@ impl<'a> FileTransferSession<'a> {
             if let Some(ref mut p) = progress {
                 p.add_bytes(uncompressed_size);
             }
-            if let Some(ref mut cb) = chunk_complete_callback {
-                cb(chunk_index);
-            }
+            pending_callbacks.push(chunk_index);
 
             trace!("Sent chunk {}/{}", chunk_index + 1, total_chunks);
         }
@@ -234,6 +243,11 @@ impl<'a> FileTransferSession<'a> {
         if !batch.is_empty() {
             self.flush_batch(&batch).await?;
             batch.clear();
+            for idx in pending_callbacks.drain(..) {
+                if let Some(ref mut cb) = chunk_complete_callback {
+                    cb(idx);
+                }
+            }
         }
 
         let checksum = reader.finalize_checksum();
@@ -354,24 +368,34 @@ impl<'a> FileTransferSession<'a> {
                 }
 
                 // 解出/复制为自有数据交由后台写；progress/回调仍按接收字节
-                // 即时上报，前端进度不因磁盘而卡顿。
+                // 即时上报，前端进度不因磁盘而卡顿。解压走流式限长，防止
+                // 恶意/损坏对端用高压缩率载荷撑爆内存（解压炸弹）。
                 let data = if flags & FLAG_COMPRESSED != 0 {
                     let decomp = decompressor.as_mut().ok_or_else(|| {
                         Error::Protocol(
                             "compressed chunk but compression disabled in config".to_string(),
                         )
                     })?;
-                    let out = decomp.decompress(payload)?;
-                    if out.len() > MAX_CHUNK_SIZE {
-                        return Err(Error::Protocol(format!(
-                            "decompressed chunk of {} bytes exceeds per-chunk cap {MAX_CHUNK_SIZE}",
-                            out.len()
-                        )));
-                    }
-                    out
+                    decomp.decompress_limited(payload, MAX_CHUNK_SIZE)?
                 } else {
                     payload.to_vec()
                 };
+
+                // Every chunk must be exactly the size the manifest implies:
+                // `chunk_size` for all but the final chunk, which is the
+                // remainder. A wrong-sized chunk would corrupt the file and
+                // desync the incremental hash, so reject it up front.
+                let expected = {
+                    let offset = chunk_index * self.config.chunk_size as u64;
+                    let remaining = file_size.saturating_sub(offset);
+                    remaining.min(self.config.chunk_size as u64) as usize
+                };
+                if data.len() != expected {
+                    return Err(Error::Protocol(format!(
+                        "chunk {chunk_index} payload {} bytes, expected {expected}",
+                        data.len()
+                    )));
+                }
                 let written = data.len() as u64;
                 current_batch.push((chunk_index, data));
                 current_bytes += written as usize;
@@ -399,13 +423,16 @@ impl<'a> FileTransferSession<'a> {
                     streams_to_receive
                 );
             }
+        }
 
-            if !current_batch.is_empty() {
-                batch_tx
-                    .send(WriteItem::Batch(std::mem::take(&mut current_batch)))
-                    .await
-                    .map_err(|_| Error::Other("file writer task ended unexpectedly".to_string()))?;
-            }
+        // 循环结束后冲刷残余批次再发 Finalize。原先这段在 while 循环内部，
+        // 导致每条 uni stream 都强制 flush，且 flush 后 current_bytes 未重置，
+        // 破坏了按 FLUSH_BATCH_BYTES 累积批次的语义（current_bytes 持续虚增）。
+        if !current_batch.is_empty() {
+            batch_tx
+                .send(WriteItem::Batch(std::mem::take(&mut current_batch)))
+                .await
+                .map_err(|_| Error::Other("file writer task ended unexpectedly".to_string()))?;
         }
 
         // 正常收齐：发终止令牌让写盘任务落盘并 finalize（乱序/续传时整读）。
@@ -478,6 +505,11 @@ async fn write_loop(
                             group.push((idx, data));
                         }
                     }
+                    // Flush at the end of every batch so contiguous frames
+                    // never accumulate to the whole file size in memory
+                    // (OOM on large files). Coalescing still happens within
+                    // a single batch.
+                    write_contiguous(&mut writer, &mut group).await?;
                 }
                 Some(WriteItem::Finalize) => {
                     finalized = true;
@@ -589,7 +621,14 @@ impl ChunkReader {
     pub async fn read_chunk(&mut self, index: u64) -> Result<Vec<u8>> {
         let offset = index * self.chunk_size as u64;
         self.file.seek(SeekFrom::Start(offset)).await?;
-        let remaining = self.file_size - offset;
+        // 防止越界 index 导致 file_size - offset 下溢（debug panic /
+        // release 回绕成巨大值，read_exact 读到 EOF 报 UnexpectedEof）。
+        let remaining = self.file_size.checked_sub(offset).ok_or_else(|| {
+            Error::Protocol(format!(
+                "chunk index {index} out of bounds: offset {offset} exceeds file size {}",
+                self.file_size
+            ))
+        })?;
         let to_read = remaining.min(self.chunk_size as u64) as usize;
         let mut buffer = vec![0u8; to_read];
         self.file.read_exact(&mut buffer).await?;

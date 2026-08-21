@@ -8,6 +8,27 @@ fn parse_bandwidth_arg(s: &str) -> Result<u64, String> {
     hyx_core::bandwidth::parse_bandwidth(s)
 }
 
+/// Parse chunk size in KB, validating the range to `1..=16384` (16 MiB).
+/// This matches `core::transfer_file::MAX_CHUNK_SIZE` and, crucially,
+/// guarantees `kb * 1024` fits in `u32` so the byte conversion in
+/// `handle_send` cannot overflow (debug panic / release wrap-around).
+fn parse_chunk_size_kb(s: &str) -> Result<u32, String> {
+    let kb: u32 = s
+        .parse()
+        .map_err(|e| format!("invalid chunk size '{}': {}", s, e))?;
+    if kb == 0 {
+        return Err("chunk size must be greater than 0 KB".into());
+    }
+    // 16384 KB == 16 MiB == core::transfer_file::MAX_CHUNK_SIZE.
+    if kb > 16384 {
+        return Err(format!(
+            "chunk size must be <= 16384 KB (16 MiB), got {} KB",
+            kb
+        ));
+    }
+    Ok(kb)
+}
+
 /// Common session parameters for connection establishment
 ///
 /// These parameters control how the P2P session is established and what role
@@ -113,8 +134,10 @@ pub struct TransferParams {
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub adaptive: bool,
 
-    /// Chunk size in KB
-    #[arg(long, default_value = "1024")]
+    /// Chunk size in KB (1..=16384, default 1024 = 1 MiB).
+    /// The upper bound matches `core::transfer_file::MAX_CHUNK_SIZE`
+    /// and prevents `chunk_size * 1024` from overflowing `u32`.
+    #[arg(long, default_value = "1024", value_parser = parse_chunk_size_kb)]
     pub chunk_size: u32,
 
     /// Maximum transfer speed (e.g., "10M", "1G", "512K", "unlimited"). Default: unlimited

@@ -49,7 +49,12 @@ impl ReconnectConfig {
     pub fn backoff_delay(&self, attempt: u32) -> Duration {
         let delay_secs = if self.exponential {
             // Exponential: 3, 6, 12, 24, 48, 60, 60, ...
-            let exp_delay = self.initial_backoff_secs * 2u64.pow(attempt);
+            // saturating_pow keeps unlimited-retry loops from overflowing
+            // u64 once attempt grows past 63 (2^63 already exceeds the
+            // max_backoff cap, so the min() below clamps it anyway).
+            let exp_delay = self
+                .initial_backoff_secs
+                .saturating_mul(2u64.saturating_pow(attempt));
             exp_delay.min(self.max_backoff_secs)
         } else {
             // Linear: 3, 3, 3, 3, ...

@@ -98,31 +98,38 @@ impl BandwidthLimiter {
         let bytes = bytes as f64;
         let mut bucket = self.bucket.lock().await;
 
-        loop {
-            // Refill tokens based on elapsed time
-            let now = Instant::now();
-            let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
-            let new_tokens = elapsed * bucket.refill_rate;
+        // Refill tokens based on elapsed time
+        let now = Instant::now();
+        let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
+        let new_tokens = elapsed * bucket.refill_rate;
+        bucket.tokens = (bucket.tokens + new_tokens).min(bucket.capacity);
+        bucket.last_refill = now;
 
-            bucket.tokens = (bucket.tokens + new_tokens).min(bucket.capacity);
-            bucket.last_refill = now;
-
-            // Check if we have enough tokens
-            if bucket.tokens >= bytes {
-                bucket.tokens -= bytes;
-                break;
-            }
-
-            // Calculate how long to wait for enough tokens
-            let tokens_needed = bytes - bucket.tokens;
-            let wait_time = tokens_needed / bucket.refill_rate;
-            let wait_duration = Duration::from_secs_f64(wait_time);
-
-            // Release lock while sleeping
-            drop(bucket);
-            sleep(wait_duration).await;
-            bucket = self.bucket.lock().await;
+        // Check if we have enough tokens
+        if bucket.tokens >= bytes {
+            bucket.tokens -= bytes;
+            return;
         }
+
+        // The request is larger than the burst capacity, so the capped
+        // refill loop could never reach `bytes` — that would spin forever.
+        // Wait for the full shortfall at the refill rate in a single sleep.
+        let tokens_needed = bytes - bucket.tokens;
+        let wait_duration = Duration::from_secs_f64(tokens_needed / bucket.refill_rate);
+
+        // Release lock while sleeping
+        drop(bucket);
+        sleep(wait_duration).await;
+        let mut bucket = self.bucket.lock().await;
+
+        // Refill again to account for drift, then consume. Tokens may go
+        // briefly negative for an oversized request; the next refill tops
+        // them back up, which is the correct "debt" semantics.
+        let now = Instant::now();
+        let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
+        bucket.tokens = (bucket.tokens + elapsed * bucket.refill_rate).min(bucket.capacity);
+        bucket.last_refill = now;
+        bucket.tokens -= bytes;
     }
 
     /// Get current statistics

@@ -9,7 +9,7 @@ use tracing::{info, warn};
 
 use hyx_core::{
     history::{record_transfer, TransferDirection, TransferRecord},
-    identity::Identity,
+    identity::{device_id_from_fingerprint, Identity},
     protocol::ConfigMessage,
     session::P2PSession,
     Uuid,
@@ -54,7 +54,7 @@ pub async fn handle_send(
     let identity = Arc::new(Identity::load_or_generate(identity_dir.as_deref())?);
     info!("  Identity fingerprint: {}", identity.fingerprint_hex());
 
-    let device_id = Uuid::new_v4();
+    let device_id = device_id_from_fingerprint(&identity.fingerprint());
 
     let mut session = establish_session(
         &session_params,

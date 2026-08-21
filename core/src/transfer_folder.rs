@@ -385,7 +385,7 @@ impl<'a> FolderTransferSession<'a> {
     pub async fn receive_folder(
         &mut self,
         output_dir: &Path,
-        state_path: Option<&Path>,
+        _state_path: Option<&Path>,
         accept_decision: impl FnOnce(&TransferInfo) -> AcceptDecision,
         mut progress: Option<&mut ProgressState>,
     ) -> Result<TransferSummary> {
@@ -415,22 +415,6 @@ impl<'a> FolderTransferSession<'a> {
         }
 
         info!("Starting receive to: {:?}", output_dir);
-        let is_resume = transfer_info.resume_from.is_some();
-
-        if let Some(state_file) = state_path {
-            if state_file.exists() {
-                match FolderTransferState::load_from_file(state_file).await {
-                    Ok(existing) if existing.transfer_id == transfer_info.transfer_id => {
-                        info!(
-                            "Detected existing transfer {}, resuming automatically",
-                            transfer_info.transfer_id
-                        );
-                    }
-                    Ok(_) => {}
-                    Err(e) => warn!("Failed to load existing state: {}", e),
-                }
-            }
-        }
 
         self.transfer_id = transfer_info.transfer_id;
         self.transfer_start = Some(Instant::now());
@@ -477,6 +461,28 @@ impl<'a> FolderTransferSession<'a> {
             transfer_info.completed_files.iter().copied().collect();
         for (file_index, file_meta) in transfer_info.items.iter().enumerate() {
             if skip.contains(&(file_index as u32)) {
+                // The sender claims this file was fully shipped in a prior
+                // session. Verify the receiver actually holds it (final file
+                // or `.partial` of the right size); otherwise the claim is a
+                // lie and skipping would silently lose data.
+                let relative_path = sanitize_relative_path(Path::new(&file_meta.path))?;
+                let full_path = output_dir.join(&relative_path);
+                let mut partial_os = full_path.as_os_str().to_os_string();
+                partial_os.push(".partial");
+                let partial = PathBuf::from(partial_os);
+                let present = if full_path.exists() {
+                    fs::metadata(&full_path).await.map(|m| m.len()).unwrap_or(0) == file_meta.size
+                } else if partial.exists() {
+                    fs::metadata(&partial).await.map(|m| m.len()).unwrap_or(0) == file_meta.size
+                } else {
+                    false
+                };
+                if !present {
+                    return Err(Error::Verification(format!(
+                        "Sender marked file {file_index} complete but local copy is missing or wrong size: {}",
+                        relative_path.display()
+                    )));
+                }
                 debug!(
                     "Skipping file {} (sender marked complete in prior session): {}",
                     file_index, file_meta.path
@@ -496,11 +502,18 @@ impl<'a> FolderTransferSession<'a> {
             }
 
             let total_chunks = chunk_count(file_meta.size, self.config.chunk_size);
+            // Deduplicate the resume bitmap: a state file may hold duplicate
+            // chunk indices, and counting them inflates `already_sent`, which
+            // would make the receiver exit before the sender finished.
             let already_sent = transfer_info
                 .resume_from
                 .as_ref()
                 .filter(|rp| rp.file_index as usize == file_index)
-                .map(|rp| rp.completed_chunks.len() as u64)
+                .map(|rp| {
+                    let unique: std::collections::HashSet<u64> =
+                        rp.completed_chunks.iter().copied().collect();
+                    unique.len() as u64
+                })
                 .unwrap_or(0);
             let streams_to_receive = total_chunks.saturating_sub(already_sent);
 
@@ -518,7 +531,12 @@ impl<'a> FolderTransferSession<'a> {
 
         match self.connection.recv_message().await? {
             Message::Complete(_) => {}
-            msg => warn!("Expected Complete message, got {:?}", msg),
+            msg => {
+                return Err(Error::Protocol(format!(
+                    "Expected Complete message, got {:?}",
+                    msg
+                )))
+            }
         }
 
         if let Some(ref mut p) = progress {
@@ -526,8 +544,6 @@ impl<'a> FolderTransferSession<'a> {
         }
         let duration = self.transfer_start.map(|s| s.elapsed()).unwrap_or_default();
         self.display_transfer_stats(total_files, total_bytes, duration.as_secs_f64(), false);
-
-        let _ = is_resume;
 
         // Build a summary the CLI can record in history. `files` is the
         // per-file relative-path list as agreed at TransferInfo time —
@@ -667,6 +683,13 @@ impl<'a> FolderTransferSession<'a> {
             let mut entries = fs::read_dir(&current).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
+                // Never follow symlinks: a link to a directory could create
+                // an infinite traversal loop, and a link to an outside file
+                // would leak data outside the selected folder.
+                if entry.file_type().await?.is_symlink() {
+                    trace!("Skipping symlink: {}", path.display());
+                    continue;
+                }
                 let metadata = entry.metadata().await?;
                 if metadata.is_file() {
                     let relative_path = path

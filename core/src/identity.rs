@@ -152,6 +152,17 @@ pub fn fingerprint_of(cert: &CertificateDer<'_>) -> Fingerprint {
     hasher.finalize().into()
 }
 
+/// Derive a stable per-device UUID from the certificate fingerprint.
+///
+/// Used as the `device_id` in discovery beacons and handshakes so a peer's
+/// identity survives restarts — a fresh random UUID per process would make
+/// every restart look like a brand-new device and break peer tracking.
+/// UUID v5 (SHA-1 over the namespace + fingerprint) is deterministic and
+/// collision-free for distinct fingerprints.
+pub fn device_id_from_fingerprint(fp: &Fingerprint) -> Uuid {
+    Uuid::new_v5(&Uuid::NAMESPACE_DNS, fp)
+}
+
 fn default_identity_dir() -> Result<PathBuf> {
     let base = dirs::config_dir().ok_or_else(|| {
         Error::Tls("no config directory available for identity storage".to_string())

@@ -58,6 +58,9 @@ class HyXCoreController : ViewModel() {
     // Speed of progress updates is throttled by the Rust side; no EMA here yet.
     private var transferJob: Job? = null
     private var transferStartedMs = 0L
+    // Set by cancelTransfer so the still-running native call's return value
+    // (which surfaces as "Transfer cancelled") doesn't double-record a failure.
+    private var cancelled = false
 
     init {
         loadSeedHistory()
@@ -85,6 +88,10 @@ class HyXCoreController : ViewModel() {
 
     fun startTransfer() {
         if (_status.value == TransferStatus.Transferring) return
+        // Send mode picks a file via the system picker; only Receive mode
+        // has a "start listener" action here.
+        if (_direction.value == TransferDirection.Send) return
+        cancelled = false
         _status.value = TransferStatus.Connecting
         transferStartedMs = System.currentTimeMillis()
         val cfg = _settings.value
@@ -99,7 +106,13 @@ class HyXCoreController : ViewModel() {
                     saveDir = HyXNative.receiveDir,
                     onProgress = ::recordProgress
                 )
-                if (err.isNullOrEmpty()) exportReceivedToDownloads() else failTransfer(err)
+                if (cancelled) return@launch
+                if (err.isNullOrEmpty()) {
+                    markCompleted()
+                    exportReceivedToDownloads()
+                } else {
+                    failTransfer(err)
+                }
             }
         } else {
             // No library: simulate a transfer so the UI stays demonstrable.
@@ -109,11 +122,14 @@ class HyXCoreController : ViewModel() {
 
     /** Send one file to a discovered peer (sender side of the link). */
     fun sendFileToPeer(peerAddress: String, filePath: String) {
-        if (_status.value == TransferStatus.Transferring) return
+        // Only start from Idle: a send during Connecting/Pairing/Transferring
+        // would race the in-flight native call and corrupt its state.
+        if (_status.value != TransferStatus.Idle) return
         if (!HyXNative.isLoaded) {
             simulateTransfer()
             return
         }
+        cancelled = false
         val cfg = _settings.value
         _status.value = TransferStatus.Connecting
         transferStartedMs = System.currentTimeMillis()
@@ -136,7 +152,8 @@ class HyXCoreController : ViewModel() {
                 port = 14567,
                 onProgress = ::recordProgress
             )
-            if (!err.isNullOrEmpty()) failTransfer(err)
+            if (cancelled) return@launch
+            if (err.isNullOrEmpty()) markCompleted() else failTransfer(err)
         }
     }
 
@@ -145,6 +162,7 @@ class HyXCoreController : ViewModel() {
         _pairingCode.value = PairingCode(code, System.currentTimeMillis() + 300_000L)
         _status.value = TransferStatus.Pairing
         if (HyXNative.isLoaded) {
+            cancelled = false
             transferStartedMs = System.currentTimeMillis()
             transferJob = viewModelScope.launch(Dispatchers.IO) {
                 val err = HyXNative.hyxPairRendezvous(
@@ -155,7 +173,13 @@ class HyXCoreController : ViewModel() {
                     saveDir = HyXNative.receiveDir,
                     onProgress = ::recordProgress
                 )
-                if (err.isNullOrEmpty()) exportReceivedToDownloads() else failTransfer(err)
+                if (cancelled) return@launch
+                if (err.isNullOrEmpty()) {
+                    markCompleted()
+                    exportReceivedToDownloads()
+                } else {
+                    failTransfer(err)
+                }
             }
         } else {
             nudgeStatusToTransferring()
@@ -168,6 +192,7 @@ class HyXCoreController : ViewModel() {
     }
 
     fun cancelTransfer() {
+        cancelled = true
         viewModelScope.launch(Dispatchers.IO) { HyXNative.hyxCancel() }
         _status.value = TransferStatus.Cancelled
         recordFinished(TransferStatus.Cancelled)
@@ -214,7 +239,8 @@ class HyXCoreController : ViewModel() {
     /**
      * Move received files from the private staging dir into the system Downloads
      * collection via MediaStore (API 29+) or the public Downloads folder (< API 29).
-     * Idempotent: the staging dir is emptied, so re-calling is a no-op.
+     * Only files that were actually exported are removed from staging — a failed
+     * export keeps its source so the user doesn't lose data.
      */
     private fun exportReceivedToDownloads() {
         val ctx = HyXNative.appContext ?: return
@@ -222,16 +248,16 @@ class HyXCoreController : ViewModel() {
         if (!staging.exists()) return
         val files = staging.listFiles()?.filter { it.isFile } ?: return
         files.forEach { f ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 insertIntoMediaStore(ctx, f)
             } else {
                 legacyCopyToDownloads(f)
             }
+            if (ok) runCatching { f.delete() }
         }
-        files.forEach { runCatching { it.delete() } }
     }
 
-    private fun insertIntoMediaStore(ctx: Context, f: File) {
+    private fun insertIntoMediaStore(ctx: Context, f: File): Boolean {
         val resolver = ctx.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, f.name)
@@ -239,36 +265,35 @@ class HyXCoreController : ViewModel() {
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
-        try {
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+        return try {
             resolver.openOutputStream(uri)?.use { out ->
                 f.inputStream().use { it.copyTo(out) }
-            }
+            } ?: return false
             values.clear()
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
+            true
         } catch (e: Exception) {
             runCatching { resolver.delete(uri, null, null) }
+            false
         }
     }
 
-    private fun legacyCopyToDownloads(f: File) {
-        runCatching {
-            val destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!destDir.exists()) destDir.mkdirs()
-            val dest = File(destDir, f.name)
-            f.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
-        }
-    }
+    private fun legacyCopyToDownloads(f: File): Boolean = runCatching {
+        val destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!destDir.exists()) destDir.mkdirs()
+        val dest = File(destDir, f.name)
+        f.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+        true
+    }.getOrDefault(false)
 
     fun pingPeer(id: String) {
+        // Toggle the "connected" marker used to prefer a peer for sending.
+        // No transfer is started here — the actual send happens via
+        // sendPickedFile from the transfer tab.
         _devices.value = _devices.value.map {
             if (it.id == id) it.copy(connected = !it.connected) else it
-        }
-        val peer = _devices.value.find { it.id == id }
-        if (peer?.connected == true) {
-            _status.value = TransferStatus.Connecting
-            nudgeStatusToTransferring()
         }
     }
 
@@ -283,6 +308,7 @@ class HyXCoreController : ViewModel() {
     }
 
     private fun recordProgress(phase: Int, transferred: Long, total: Long, speed: Long) {
+        if (cancelled) return
         val elapsed = System.currentTimeMillis() - transferStartedMs
         _status.value = TransferStatus.Transferring
         _progress.value = TransferProgress(
@@ -293,11 +319,18 @@ class HyXCoreController : ViewModel() {
             speedBps = speed.toDouble(),
             elapsedMs = elapsed
         )
-        if (total > 0 && transferred >= total) {
-            _status.value = TransferStatus.Completed
-            recordFinished(TransferStatus.Completed)
-            _progress.value = null
-        }
+        // Completion is decided by the native call's return value (the JNI
+        // drain loop exits with a Done event after the transfer finishes),
+        // not by transferred >= total here — a final callback that lands a
+        // few bytes short of total would otherwise never mark the transfer
+        // done, and firing here would double-record history.
+    }
+
+    /** Terminal success: record history once and clear the progress panel. */
+    private fun markCompleted() {
+        _status.value = TransferStatus.Completed
+        recordFinished(TransferStatus.Completed)
+        _progress.value = null
     }
 
     /** Standalone demo path for when libhyx_mobile.so isn't built. */
@@ -310,6 +343,7 @@ class HyXCoreController : ViewModel() {
                 recordProgress(2, done, total, 4194304)
                 delay(16)
             }
+            if (!cancelled) markCompleted()
         }
     }
 

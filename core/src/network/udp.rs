@@ -32,6 +32,7 @@ impl DiscoveryService {
         device_name: String,
         transfer_port: u16,
         cert_fingerprint: Fingerprint,
+        device_id: Uuid,
     ) -> Result<Self> {
         let discovery_port = DEFAULT_DISCOVERY_PORT;
         let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), discovery_port);
@@ -44,7 +45,7 @@ impl DiscoveryService {
 
         Ok(Self {
             socket,
-            device_id: Uuid::new_v4(),
+            device_id,
             device_name,
             transfer_port,
             cert_fingerprint,

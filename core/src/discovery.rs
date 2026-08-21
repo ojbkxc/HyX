@@ -4,9 +4,10 @@ use crate::error::Result;
 use crate::identity::Fingerprint;
 use crate::network::udp::{DiscoveryService, PeerInfo};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
@@ -16,29 +17,36 @@ pub struct DiscoveryManager {
     service: Arc<DiscoveryService>,
     peers: Arc<RwLock<HashMap<Uuid, PeerInfo>>>,
     peer_ttl: Duration,
+    task_handles: Mutex<Option<Vec<JoinHandle<()>>>>,
 }
 
 impl DiscoveryManager {
     /// Create a new discovery manager. `cert_fingerprint` is the SHA-256
     /// of our local cert; receivers use it to pin our TLS identity when
-    /// initiating a QUIC connection.
+    /// initiating a QUIC connection. `device_id` is the stable per-device
+    /// identifier carried in beacons (derived from the cert fingerprint).
     pub async fn new(
         device_name: String,
         transfer_port: u16,
         cert_fingerprint: Fingerprint,
+        device_id: Uuid,
         peer_ttl: Duration,
     ) -> Result<Self> {
-        let service = DiscoveryService::new(device_name, transfer_port, cert_fingerprint).await?;
+        let service =
+            DiscoveryService::new(device_name, transfer_port, cert_fingerprint, device_id).await?;
 
         Ok(Self {
             service: Arc::new(service),
             peers: Arc::new(RwLock::new(HashMap::new())),
             peer_ttl,
+            task_handles: Mutex::new(None),
         })
     }
 
-    /// Start the discovery service
-    pub async fn start(self: Arc<Self>) -> Result<()> {
+    /// Start the discovery service. Spawns the broadcaster / receiver /
+    /// cleanup tasks and records their handles so [`stop`](Self::stop) can
+    /// abort them and release the bound UDP socket. Returns immediately.
+    pub async fn start(&self) -> Result<()> {
         debug!("Starting discovery manager");
 
         // Spawn beacon broadcaster
@@ -120,14 +128,19 @@ impl DiscoveryManager {
             })
         };
 
-        // Wait for all tasks (they run forever)
-        tokio::select! {
-            _ = broadcaster => warn!("Broadcaster task ended"),
-            _ = receiver => warn!("Receiver task ended"),
-            _ = cleanup => warn!("Cleanup task ended"),
-        }
-
+        *self.task_handles.lock().expect("task handles lock") =
+            Some(vec![broadcaster, receiver, cleanup]);
         Ok(())
+    }
+
+    /// Abort all background tasks and release the bound UDP socket. Safe to
+    /// call multiple times; a no-op once stopped.
+    pub fn stop(&self) {
+        if let Some(handles) = self.task_handles.lock().expect("task handles lock").take() {
+            for h in handles {
+                h.abort();
+            }
+        }
     }
 
     /// Get list of discovered peers
@@ -168,6 +181,12 @@ impl DiscoveryManager {
     }
 }
 
+impl Drop for DiscoveryManager {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +197,7 @@ mod tests {
             "Test Device".to_string(),
             crate::DEFAULT_TRANSFER_PORT,
             [0u8; 32],
+            Uuid::new_v4(),
             Duration::from_secs(10),
         )
         .await;
@@ -194,6 +214,7 @@ mod tests {
             "Test".to_string(),
             crate::DEFAULT_TRANSFER_PORT,
             [0u8; 32],
+            Uuid::new_v4(),
             Duration::from_secs(10),
         )
         .await;

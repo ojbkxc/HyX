@@ -87,6 +87,23 @@ pub fn client_config_pinning(
     Ok(Arc::new(cfg))
 }
 
+/// Constant-time comparison of two 32-byte fingerprints.
+///
+/// `==` on `[u8; 32]` short-circuits on the first differing byte, leaking
+/// how many leading bytes match via timing. Although SHA-256 fingerprints
+/// are not secret (an attacker cannot control the hash output to exploit
+/// the leak), a constant-time comparison is a defensive best practice that
+/// eliminates the side-channel entirely and protects against future changes
+/// to the trust model.
+fn ct_eq_fingerprint(a: &Fingerprint, b: &Fingerprint) -> bool {
+    // OR-accumulate all byte differences; result is 0 iff arrays are equal.
+    let mut diff: u8 = 0;
+    for i in 0..32 {
+        diff |= a[i] ^ b[i];
+    }
+    diff == 0
+}
+
 /// rustls verifier that accepts exactly one peer certificate, identified by
 /// its SHA-256 fingerprint. Signature verification (proving the peer holds
 /// the private key) is delegated to the active crypto provider — we only
@@ -117,7 +134,9 @@ impl ServerCertVerifier for FingerprintVerifier {
         _now: UnixTime,
     ) -> std::result::Result<ServerCertVerified, rustls::Error> {
         let presented = fingerprint_of(end_entity);
-        if presented == self.expected {
+        // Constant-time comparison: avoids leaking prefix-match length via
+        // timing, even though SHA-256 fingerprints are not secret values.
+        if ct_eq_fingerprint(&presented, &self.expected) {
             Ok(ServerCertVerified::assertion())
         } else {
             Err(rustls::Error::General(format!(
