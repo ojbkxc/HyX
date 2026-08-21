@@ -21,6 +21,9 @@ import java.io.File
 object HyXNative {
     private const val TAG = "HyXNative"
 
+    // @Volatile: written in ensureLoaded (usually main thread), read from
+    // any thread via isLoaded — without this the store may not be visible.
+    @Volatile
     private var loaded = false
 
     /** App-private file dir, set by HyXApp. Used as default receive landing zone. */
