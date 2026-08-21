@@ -126,7 +126,12 @@ async fn receive_into(
         .map_err(|e| e.to_string())
 }
 
-/// Send `path` to the peer we already connected to.
+/// Send `path` to the peer we already connected to, with on-disk resume
+/// state so `send_path`'s internal reconnect/retry loop continues instead of
+/// restarting. The state file lives as a sibling of the source; on Android the
+/// source sits in the app's cache (writable), and the core deletes the state
+/// on success. A transient failure leaves it behind, so the next attempt
+/// (same path, same peer output dir) resumes from the completed chunks.
 async fn send_path(
     session: &mut P2PSession,
     path: &str,
@@ -134,11 +139,22 @@ async fn send_path(
 ) -> Result<String, String> {
     let mut prog = ProgressState::new(0);
     prog.set_progress_callback(progress_sink(tx.clone()));
+
+    let src = std::path::Path::new(path);
+    let mut state_path = src.to_path_buf();
+    if let Some(name) = src
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+    {
+        state_path.set_file_name(format!(".{name}.hyx-resume"));
+    }
+    let state_path = (src.parent().is_some()).then_some(state_path);
+
     session
         .send_path(
-            std::path::Path::new(path),
+            src,
             &ReconnectConfig::default(),
-            None,
+            state_path.as_deref(),
             Some(&mut prog),
         )
         .await
