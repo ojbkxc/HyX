@@ -66,9 +66,11 @@ val cargoNdk = tasks.register<Exec>("cargoNdk") {
     // rootProject is the `android` gradle root; its projectDir is <repo>/android,
     // so its parentFile is the repo root where mobile/Cargo.toml lives.
     workingDir = rootProject.projectDir.parentFile
-    commandLine("sh", "-c",
-        "cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build " +
-            "--release -p hyx-mobile --manifest-path mobile/Cargo.toml"
+    // Call cargo directly (not via `sh -c`) so the task works on Windows too.
+    commandLine(
+        "cargo", "ndk", "-t", "arm64-v8a", "-o",
+        "android/app/src/main/jniLibs", "build", "--release",
+        "-p", "hyx-mobile", "--manifest-path", "mobile/Cargo.toml"
     )
 }
 
