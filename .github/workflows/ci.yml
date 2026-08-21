@@ -85,16 +85,19 @@ jobs:
         working-directory: android
         run: gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Rename APK
+      - name: Rename APK with version
         run: |
+          VERSION=$(sed -n -E 's/versionName *= *"([^"]*)"/\1/p' android/app/build.gradle.kts | head -1)
+          VERSION=${VERSION:-0.1.0}
           if ls android/app/build/outputs/apk/release/app-release.apk >/dev/null 2>&1; then
-            cp android/app/build/outputs/apk/release/app-release.apk "HyX-arm64.apk"
+            cp android/app/build/outputs/apk/release/app-release.apk "HyX-v${VERSION}-arm64.apk"
           else
-            cp android/app/build/outputs/apk/release/app-release-unsigned.apk "HyX-arm64.apk"
+            cp android/app/build/outputs/apk/release/app-release-unsigned.apk "HyX-v${VERSION}-arm64.apk"
           fi
+          echo "APK=HyX-v${VERSION}-arm64.apk" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HyX-arm64.apk
-          path: HyX-arm64.apk
+          name: ${{ env.APK }}
+          path: HyX-v*-arm64.apk
