@@ -13,3 +13,14 @@ Thumbs.db
 
 # 本地日志
 *.log
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.kotlin/
+android/captures/
+*.apk
+*.so
+.cargo-ndk

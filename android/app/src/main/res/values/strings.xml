@@ -1,0 +1,36 @@
+<resources>
+    <string name="app_name">HyX</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_transfer">传输</string>
+    <string name="nav_devices">设备</string>
+    <string name="nav_history">历史</string>
+
+    <!-- Transfer -->
+    <string name="tab_transfer_title">极速传输</string>
+    <string name="mode_send">发送</string>
+    <string name="mode_receive">接收</string>
+    <string name="pair_code">配对码</string>
+    <string name="pair_scan">扫码配对</string>
+    <string name="pair_lan">局域网发现</string>
+    <string name="select_files">选择文件</string>
+    <string name="select_folder">选择文件夹</string>
+    <string name="cancel">取消</string>
+    <string name="start_transfer">开始传输</string>
+
+    <!-- Progress -->
+    <string name="speed">速度</string>
+    <string name="remaining">剩余</string>
+    <string name="elapsed">已用时</string>
+    <string name="transferred">已传输</string>
+    <string name="total_size">总大小</string>
+
+    <!-- Devices -->
+    <string name="tab_devices_title">设备</string>
+    <string name="no_devices">尚未发现设备</string>
+    <string name="waiting_pair">等待配对…</string>
+
+    <!-- History -->
+    <string name="tab_history_title">传输历史</string>
+    <string name="no_history">暂无传输记录</string>
+</resources>

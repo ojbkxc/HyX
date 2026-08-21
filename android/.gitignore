@@ -1,0 +1,11 @@
+.gradle/
+build/
+**/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+# Rust .so output copied in by the cargoNdk task.
+app/src/main/jniLibs/

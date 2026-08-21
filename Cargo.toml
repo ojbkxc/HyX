@@ -13,7 +13,7 @@ keywords = ["p2p", "file-transfer", "quic", "networking"]
 categories = ["command-line-utilities", "network-programming"]
 
 [workspace]
-members = ["core", "cli", "rendezvous"]
+members = ["core", "cli", "rendezvous", "mobile"]
 
 [dependencies]
 hyx-core = { path = "./core" }

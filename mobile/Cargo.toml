@@ -1,0 +1,20 @@
+[package]
+name = "hyx-mobile"
+version = "0.1.0"
+edition = "2021"
+authors = ["ojbkxc"]
+description = "JNI/FFI boundary exposing hyx-core to Android (via android/app)"
+license = "MIT"
+publish = false
+
+[lib]
+name = "hyx_mobile"
+crate-type = ["cdylib"]
+
+[dependencies]
+hyx-core = { path = "../core" }
+tokio = { version = "1.40", features = ["rt-multi-thread", "sync", "time"] }
+log = "0.4"
+# default-features off removes the JVM "invocation" feature, which is only
+# needed at runtime and keeps the CI host build from pulling jvm symbols.
+jni = { version = "0.21", default-features = false }

@@ -507,6 +507,7 @@ impl<'a> FolderTransferSession<'a> {
             self.receive_single_file(
                 &full_path,
                 file_index as u32,
+                file_meta.size,
                 total_chunks,
                 streams_to_receive,
                 progress.as_deref_mut(),
@@ -601,6 +602,7 @@ impl<'a> FolderTransferSession<'a> {
         &mut self,
         path: &Path,
         file_index: u32,
+        file_size: u64,
         total_chunks: u64,
         streams_to_receive: u64,
         progress: Option<&mut ProgressState>,
@@ -610,6 +612,7 @@ impl<'a> FolderTransferSession<'a> {
         let receiver_checksum = file_session
             .receive_file(
                 path,
+                file_size,
                 total_chunks,
                 streams_to_receive,
                 None::<fn(u64)>,
