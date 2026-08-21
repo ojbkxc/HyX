@@ -1,5 +1,9 @@
 package com.ojbkxc.hyx.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Context
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -28,9 +32,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.documentfile.provider.DocumentFile
 import com.ojbkxc.hyx.ui.components.MetricCardRow
 import com.ojbkxc.hyx.ui.components.RingProgress
 import com.ojbkxc.hyx.ui.components.StatusBadge
@@ -40,6 +46,7 @@ import com.ojbkxc.hyx.ui.components.formatSpeed
 import com.ojbkxc.hyx.ui.model.TransferDirection
 import com.ojbkxc.hyx.ui.model.TransferStatus
 import com.ojbkxc.hyx.core.HyXCoreController
+import java.io.File
 
 @Composable
 fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
@@ -51,6 +58,17 @@ fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
 
     val active = status == TransferStatus.Transferring ||
         status == TransferStatus.Connecting || status == TransferStatus.Pairing
+
+    val context = LocalContext.current
+    val pickFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            copyToCache(context, uri)?.let { controller.sendPickedFile(it) }
+        }
+    }
+
+    val sending = direction == TransferDirection.Send
 
     Column(
         modifier = Modifier
@@ -111,7 +129,10 @@ fun TransferScreen(controller: HyXCoreController, onScan: () -> Unit) {
         } else {
             TransferIdlePanel(
                 hasPairing = pairingCode != null,
-                onStart = controller::startTransfer,
+                primaryLabel = if (sending) "选择文件并发给设备" else "开始接收",
+                onPrimary = {
+                    if (sending) pickFile.launch(arrayOf("*/*")) else controller.startTransfer()
+                },
                 onPair = { controller.pairWithCode(pairingCode?.code ?: "HYX-" + (1000..9999).random()) },
                 onScan = onScan,
                 onStartDiscovery = controller::startDiscovery
@@ -163,7 +184,8 @@ private fun TransferringPanel(
 @Composable
 private fun TransferIdlePanel(
     hasPairing: Boolean,
-    onStart: () -> Unit,
+    primaryLabel: String,
+    onPrimary: () -> Unit,
     onPair: () -> Unit,
     onScan: () -> Unit,
     onStartDiscovery: () -> Unit
@@ -173,10 +195,10 @@ private fun TransferIdlePanel(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Button(
-            onClick = onStart,
+            onClick = onPrimary,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(16.dp)
-        ) { Text("选择文件并开始传输") }
+        ) { Text(primaryLabel) }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(
@@ -237,6 +259,18 @@ private fun statusText(status: TransferStatus): String = when (status) {
     TransferStatus.Completed -> "已完成"
     TransferStatus.Failed -> "失败"
     TransferStatus.Cancelled -> "已取消"
+}
+
+/** Copy a content URI into the app cache so the Rust kernel can read it by path. */
+private fun copyToCache(context: Context, uri: Uri): String? = try {
+    val name = DocumentFile.fromSingleUri(context, uri)?.name ?: "share.bin"
+    val destDir = File(context.cacheDir, "hyx_send").apply { mkdirs() }
+    val dest = File(destDir, name)
+    val input = context.contentResolver.openInputStream(uri) ?: return null
+    input.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+    dest.absolutePath
+} catch (e: Exception) {
+    null
 }
 
 private fun etaMs(p: com.ojbkxc.hyx.ui.model.TransferProgress): Long {
