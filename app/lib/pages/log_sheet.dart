@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hyx_app/gen/strings.g.dart';
@@ -10,12 +12,12 @@ import 'package:refena_flutter/refena_flutter.dart';
 /// 对应 Kotlin `LogSheet.kt`：级别过滤 chips + 等宽字体日志列表 +
 /// 复制/清空/导出。
 void showLogSheet(BuildContext context) {
-  showModalBottomSheet(
+  unawaited(showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
     builder: (_) => const LogSheet(),
-  );
+  ));
 }
 
 class LogSheet extends StatelessWidget {

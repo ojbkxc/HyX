@@ -35,7 +35,7 @@ Future<void> main(List<String> args) async {
 /// LifeCycleWatcher / ShortcutWatcher 等桌面端 watcher，仅保留 MaterialApp +
 /// i18n + 主题。后续按需在 [HomePage] 内部按平台挂载 watcher。
 class HyXApp extends StatelessWidget {
-  const HyXApp();
+  const HyXApp({super.key});
 
   @override
   Widget build(BuildContext context) {

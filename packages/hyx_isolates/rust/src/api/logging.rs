@@ -70,10 +70,12 @@ fn level_to_enum(l: &Level) -> RsLogLevel {
 
 /// `tracing` 字段访问者：收集 `message` 字段 + 其余字段为 `key=value`。
 /// 对应 mobile `FieldCollector`，逐字复制以保持日志格式一致。
+///
+/// 注意：不标注 `pub`，避免 FRB 为此内部实现细节生成 Dart 绑定。
 #[derive(Default)]
-pub struct FieldCollector {
-    pub message: String,
-    pub extras: Vec<String>,
+struct FieldCollector {
+    message: String,
+    extras: Vec<String>,
 }
 
 impl Visit for FieldCollector {

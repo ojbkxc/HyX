@@ -63,7 +63,7 @@ class HistoryDrawer extends StatelessWidget {
   }
 
   void _confirmClear(BuildContext context) {
-    showDialog(
+    unawaited(showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(t.history.clear),
@@ -79,7 +79,7 @@ class HistoryDrawer extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 

@@ -118,7 +118,7 @@ class StartReceiveAction extends AsyncReduxAction<TransferService, TransferState
   @override
   Future<TransferState> reduce() async {
     if (state.busy) return state;
-    notifier._sub?.cancel();
+    unawaited(notifier._sub?.cancel());
 
     final dir = saveDir ?? (await _defaultSaveDir());
 
@@ -126,7 +126,7 @@ class StartReceiveAction extends AsyncReduxAction<TransferService, TransferState
       final stream = rust_transfer.startListener(port: port, chunkBytes: chunkBytes, compression: compression, saveDir: dir);
       notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
-      notifier._sub?.cancel();
+      unawaited(notifier._sub?.cancel());
       notifier._sub = null;
       return state.copyWith(
         status: model.RsTransferStatus.failed,
@@ -164,14 +164,14 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
   @override
   Future<TransferState> reduce() async {
     if (state.busy) return state;
-    notifier._sub?.cancel();
+    unawaited(notifier._sub?.cancel());
 
     final name = filePath.split(RegExp(r'[/\\]')).last;
     try {
       final stream = rust_transfer.connect(peerAddress: peerAddress, filePath: filePath, chunkBytes: chunkBytes, compression: compression, port: port);
       notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
-      notifier._sub?.cancel();
+      unawaited(notifier._sub?.cancel());
       notifier._sub = null;
       return state.copyWith(
         status: model.RsTransferStatus.failed,
@@ -209,7 +209,7 @@ class StartPairReceiveAction extends AsyncReduxAction<TransferService, TransferS
   @override
   Future<TransferState> reduce() async {
     if (state.busy) return state;
-    notifier._sub?.cancel();
+    unawaited(notifier._sub?.cancel());
 
     final dir = saveDir ?? (await _defaultSaveDir());
 
@@ -217,7 +217,7 @@ class StartPairReceiveAction extends AsyncReduxAction<TransferService, TransferS
       final stream = rust_transfer.pairRendezvous(code: code, server: server, port: port, compression: compression, saveDir: dir);
       notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
-      notifier._sub?.cancel();
+      unawaited(notifier._sub?.cancel());
       notifier._sub = null;
       return state.copyWith(
         status: model.RsTransferStatus.failed,
@@ -256,14 +256,14 @@ class StartPairSendAction extends AsyncReduxAction<TransferService, TransferStat
   @override
   Future<TransferState> reduce() async {
     if (state.busy) return state;
-    notifier._sub?.cancel();
+    unawaited(notifier._sub?.cancel());
 
     final name = filePath.split(RegExp(r'[/\\]')).last;
     try {
       final stream = rust_transfer.pairSend(code: code, server: server, port: port, filePath: filePath, chunkBytes: chunkBytes, compression: compression);
       notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
-      notifier._sub?.cancel();
+      unawaited(notifier._sub?.cancel());
       notifier._sub = null;
       return state.copyWith(
         status: model.RsTransferStatus.failed,
@@ -288,11 +288,11 @@ class CancelTransferAction extends ReduxAction<TransferService, TransferState> {
   TransferState reduce() {
     if (!state.busy) return state;
     try {
-      rust_transfer.cancel();
+      unawaited(rust_transfer.cancel());
     } catch (e) {
       _logger.warning('cancel failed: $e');
     }
-    notifier._sub?.cancel();
+    unawaited(notifier._sub?.cancel());
     notifier._sub = null;
     return state.copyWith(
       status: model.RsTransferStatus.cancelled,
@@ -305,7 +305,7 @@ class CancelTransferAction extends ReduxAction<TransferService, TransferState> {
 class ResetTransferAction extends ReduxAction<TransferService, TransferState> {
   @override
   TransferState reduce() {
-    notifier._sub?.cancel();
+    unawaited(notifier._sub?.cancel());
     notifier._sub = null;
     return TransferState.idle;
   }
@@ -323,7 +323,7 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
         event.status == model.RsTransferStatus.failed ||
         event.status == model.RsTransferStatus.cancelled;
     if (isDone) {
-      notifier._sub?.cancel();
+      unawaited(notifier._sub?.cancel());
       notifier._sub = null;
     }
     return state.copyWith(

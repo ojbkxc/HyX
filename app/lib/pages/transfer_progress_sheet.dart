@@ -18,14 +18,14 @@ import 'package:refena_flutter/refena_flutter.dart';
 /// 简化设计：作为 showModalBottomSheet 弹出，传输结束后延迟 1.5s 自动关闭，
 /// 让用户看到最终状态。
 void showTransferProgressSheet(BuildContext context) {
-  showModalBottomSheet(
+  unawaited(showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     isDismissible: false,
     enableDrag: false,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
     builder: (_) => const TransferProgressSheet(),
-  );
+  ));
 }
 
 class TransferProgressSheet extends StatefulWidget {

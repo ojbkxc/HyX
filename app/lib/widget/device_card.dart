@@ -96,7 +96,7 @@ class _Avatar extends StatelessWidget {
     return Container(
       width: 44,
       height: 44,
-      decoration: BoxDecoration(color: scheme.surfaceVariant, shape: BoxShape.circle),
+      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, shape: BoxShape.circle),
       alignment: Alignment.center,
       child: Text(
         initial,

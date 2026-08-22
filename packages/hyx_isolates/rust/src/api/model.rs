@@ -10,6 +10,7 @@ use hyx_core::Uuid;
 
 /// 设备连接方式：局域网直连或经 rendezvous 服务器中继握手。
 #[frb]
+#[derive(Clone)]
 pub enum RsDeviceVia {
     /// LAN UDP 广播发现的 peer，直连 QUIC。
     Lan,
@@ -48,6 +49,7 @@ pub enum RsTransferStatus {
 /// `tracing` Level 序数，与 mobile `level_to_int` 一致：
 /// 0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR。
 #[frb]
+#[derive(Clone)]
 pub enum RsLogLevel {
     Trace,
     Debug,

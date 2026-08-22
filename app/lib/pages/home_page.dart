@@ -130,7 +130,7 @@ class _HomePageState extends State<HomePage> with Refena {
               subtitle: Text(t.pair.subtitle),
               onTap: () {
                 Navigator.pop(context); // 关闭 Drawer。
-                showPairingDialog(context);
+                unawaited(showPairingDialog(context));
               },
             ),
             ListTile(
@@ -200,14 +200,14 @@ class _HomePageState extends State<HomePage> with Refena {
   }
 
   void _showAbout(BuildContext context) {
-    showDialog(
+    unawaited(showDialog(
       context: context,
       builder: (ctx) => AboutDialog(
         applicationName: t.appName,
         applicationVersion: '0.1.0',
         applicationLegalese: 'P2P file transfer over QUIC',
       ),
-    );
+    ));
   }
 
   /// 检测应用更新，发现新版本时弹窗提示。
@@ -218,7 +218,7 @@ class _HomePageState extends State<HomePage> with Refena {
     try {
       final info = await UpdateChecker.check('1.0.0');
       if (info != null && mounted) {
-        showDialog(
+        unawaited(showDialog(
           context: context,
           builder: (context) => AlertDialog(
             title: Text('发现新版本 ${info.version}'),
@@ -237,7 +237,7 @@ class _HomePageState extends State<HomePage> with Refena {
               ),
             ],
           ),
-        );
+        ));
       }
     } catch (_) {}
   }

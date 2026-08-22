@@ -108,7 +108,7 @@ fn progress_sink(
         st.last_done = done;
         drop(st);
         let _ = sink.add(RsProgressEvent {
-            direction,
+            direction: direction.clone(),
             phase: 2,
             transferred: done,
             total,
