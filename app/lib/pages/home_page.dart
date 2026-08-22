@@ -10,6 +10,7 @@ import 'package:hyx_app/pages/transfer_progress_sheet.dart';
 import 'package:hyx_app/provider/device_provider.dart';
 import 'package:hyx_app/provider/log_provider.dart';
 import 'package:hyx_app/provider/transfer_provider.dart';
+import 'package:hyx_app/util/update_checker.dart';
 import 'package:hyx_app/widget/device_card.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:refena_flutter/refena_flutter.dart';
@@ -42,6 +43,8 @@ class _HomePageState extends State<HomePage> with Refena {
       unawaited(ref.redux(deviceProvider).dispatch(LoadMyDeviceAction()));
       // 启动自动发现。
       ref.redux(deviceProvider).dispatch(StartDiscoveryAction());
+      // 检测更新（fire-and-forget）
+      unawaited(_checkForUpdate());
     });
   }
 
@@ -205,6 +208,38 @@ class _HomePageState extends State<HomePage> with Refena {
         applicationLegalese: 'P2P file transfer over QUIC',
       ),
     );
+  }
+
+  /// 检测应用更新，发现新版本时弹窗提示。
+  ///
+  /// 检测顺序：优先 R2 下载站 latest.json，回退到 GitHub Releases。
+  /// 当前版本号先硬编码 '1.0.0'，后续可改为从 pubspec 读取。
+  Future<void> _checkForUpdate() async {
+    try {
+      final info = await UpdateChecker.check('1.0.0');
+      if (info != null && mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('发现新版本 ${info.version}'),
+            content: Text(info.body),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('稍后'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  // 打开下载链接
+                },
+                child: const Text('立即更新'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (_) {}
   }
 }
 

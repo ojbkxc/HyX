@@ -28,6 +28,7 @@ dependencies:
   path: 1.9.1
   path_provider: 2.1.6
   pretty_qr_code: 3.6.0
+  http: ^1.2.0
   refena_flutter: 3.5.0
   shared_preferences: 2.5.5
   slang: 4.19.0

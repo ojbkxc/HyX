@@ -746,11 +746,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: 编译 CLI
-        run: cargo build --release --package hyx-cli
+        run: cargo build --release --package hyx
 
       # tar 保留可执行位，直接上传 artifact 会丢失该位
       - name: 创建 tar.gz 归档
-        run: tar -czvf HyX-CLI-${{ needs.build.outputs.version }}-${{ matrix.suffix }}.tar.gz -C target/release hyx-cli
+        run: tar -czvf HyX-CLI-${{ needs.build.outputs.version }}-${{ matrix.suffix }}.tar.gz -C target/release hyx
 
       - name: 上传 CLI
         uses: actions/upload-artifact@v4
@@ -782,10 +782,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: 编译 CLI
-        run: cargo build --release --package hyx-cli
+        run: cargo build --release --package hyx
 
       - name: 重命名 CLI 可执行文件
-        run: Rename-Item -Path "target\release\hyx-cli.exe" -NewName "HyX-CLI-${{ needs.build.outputs.version }}-windows-${{ matrix.suffix }}.exe"
+        run: Rename-Item -Path "target\release\hyx.exe" -NewName "HyX-CLI-${{ needs.build.outputs.version }}-windows-${{ matrix.suffix }}.exe"
 
       - name: 上传 CLI
         uses: actions/upload-artifact@v4
