@@ -146,11 +146,11 @@ class _PairingDialogState extends State<PairingDialog> with Refena {
 
     Navigator.pop(context);
     if (_isSend) {
-      unawaited(context.redux(transferProvider).dispatch(
+      unawaited(context.redux(transferProvider).dispatchAsync(
         StartPairSendAction(code: code, server: server, filePath: _filePath!, port: port),
       ));
     } else {
-      unawaited(context.redux(transferProvider).dispatch(
+      unawaited(context.redux(transferProvider).dispatchAsync(
         StartPairReceiveAction(code: code, server: server, port: port),
       ));
     }

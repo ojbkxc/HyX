@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hyx_app/provider/log_provider.dart';
@@ -10,6 +12,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 final _logger = Logger('Init');
+
+/// 初始化 [Logger] 根记录器层级。
+///
+/// 设置 [Logger.root] 的 [hierarchicalLoggingEnabled] 并将根级别设为 [level]。
+void initLogger(Level level) {
+  hierarchicalLoggingEnabled = true;
+  Logger.root.level = level;
+}
 
 /// 在 `MaterialApp` 启动前执行的初始化。
 ///
@@ -72,7 +82,7 @@ Future<RefenaContainer> preInit(List<String> args) async {
   // 预热日志回调：在 widget 树挂载前通过 container 直接 dispatch，
   // 这样 Rust 侧 tracing 事件从启动伊始就被收集到 logProvider。
   try {
-    unawaited(container.redux(logProvider).dispatch(InstallLogCallbackAction()));
+    unawaited(container.redux(logProvider).dispatchAsync(InstallLogCallbackAction()));
   } catch (e) {
     _logger.warning('Log callback install failed: $e');
   }
@@ -83,7 +93,7 @@ Future<RefenaContainer> preInit(List<String> args) async {
 /// 简易 Refena 观察者，debug 模式下打印状态变化。
 class CustomRefenaObserver extends RefenaObserver {
   @override
-  void onChange(RefenaEvent event) {
+  void handleEvent(RefenaEvent event) {
     if (kDebugMode) {
       _logger.fine(event.toString());
     }

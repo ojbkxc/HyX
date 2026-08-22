@@ -71,7 +71,7 @@ class HistoryDrawer extends StatelessWidget {
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t.history.cancel)),
           TextButton(
             onPressed: () {
-              unawaited(context.redux(historyProvider).dispatch(ClearHistoryAction()));
+              unawaited(context.redux(historyProvider).dispatchAsync(ClearHistoryAction()));
               Navigator.pop(ctx);
             },
             child: Text(t.history.clear),

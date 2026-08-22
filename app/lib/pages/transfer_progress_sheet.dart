@@ -136,7 +136,7 @@ class _TransferProgressSheetState extends State<TransferProgressSheet> with Refe
           durationMillis: st.endTime!.difference(st.startTime!).inMilliseconds,
           timestamp: st.endTime!.millisecondsSinceEpoch,
         );
-        unawaited(context.redux(historyProvider).dispatch(AddHistoryRecordAction(record)));
+        unawaited(context.redux(historyProvider).dispatchAsync(AddHistoryRecordAction(record)));
       }
       // 展示结果 SnackBar 后关闭。
       final msg = st.status == model.RsTransferStatus.completed

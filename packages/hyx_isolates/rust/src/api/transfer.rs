@@ -192,7 +192,11 @@ pub fn start_listener(
 ) -> Result<()> {
     use hyx_core::discovery::DiscoveryManager;
 
-    let port_u16 = if port > 0 { port as u16 } else { hyx_core::DEFAULT_TRANSFER_PORT };
+    let port_u16 = if port > 0 {
+        port as u16
+    } else {
+        hyx_core::DEFAULT_TRANSFER_PORT
+    };
     let _ = config_from(chunk_bytes, compression);
     let dir = save_dir.clone();
     let sink_clone = sink.clone();
@@ -266,7 +270,11 @@ pub fn connect(
     sink: StreamSink<RsProgressEvent>,
 ) -> Result<()> {
     let cfg = config_from(chunk_bytes, compression);
-    let port_u16 = if port > 0 { port as u16 } else { hyx_core::DEFAULT_TRANSFER_PORT };
+    let port_u16 = if port > 0 {
+        port as u16
+    } else {
+        hyx_core::DEFAULT_TRANSFER_PORT
+    };
     let peer = peer_address.clone();
     let path = file_path.clone();
     let sink_clone = sink.clone();
@@ -280,8 +288,13 @@ pub fn connect(
                     return;
                 }
             };
-            match P2PSession::discover_peer(port_u16, &identity(), current_device_id(), Some(target))
-                .await
+            match P2PSession::discover_peer(
+                port_u16,
+                &identity(),
+                current_device_id(),
+                Some(target),
+            )
+            .await
             {
                 Ok(pair) => pair,
                 Err(e) => {
@@ -298,15 +311,14 @@ pub fn connect(
                 }
             }
         };
-        let mut session = match P2PSession::connect(addr, fp, identity(), current_device_id(), cfg)
-            .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
-                return;
-            }
-        };
+        let mut session =
+            match P2PSession::connect(addr, fp, identity(), current_device_id(), cfg).await {
+                Ok(s) => s,
+                Err(e) => {
+                    emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                    return;
+                }
+            };
         let res = send_path(&mut session, &path, &sink_clone).await;
         match res {
             Ok(()) => emit_final(&sink_clone, RsTransferStatus::Completed, None),
@@ -340,7 +352,11 @@ pub fn pair_rendezvous(
     sink: StreamSink<RsProgressEvent>,
 ) -> Result<()> {
     let cfg = config_from(1024 * 1024, compression);
-    let port_u16 = if port > 0 { port as u16 } else { DEFAULT_RENDEZVOUS_PORT };
+    let port_u16 = if port > 0 {
+        port as u16
+    } else {
+        DEFAULT_RENDEZVOUS_PORT
+    };
     let code_o = code.clone();
     let server_o = server.clone();
     let dir = save_dir.clone();
@@ -414,7 +430,11 @@ pub fn pair_send(
     sink: StreamSink<RsProgressEvent>,
 ) -> Result<()> {
     let cfg = config_from(chunk_bytes, compression);
-    let port_u16 = if port > 0 { port as u16 } else { DEFAULT_RENDEZVOUS_PORT };
+    let port_u16 = if port > 0 {
+        port as u16
+    } else {
+        DEFAULT_RENDEZVOUS_PORT
+    };
     let code_o = code.clone();
     let server_o = server.clone();
     let path = file_path.clone();

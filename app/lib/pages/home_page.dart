@@ -38,9 +38,9 @@ class _HomePageState extends State<HomePage> with Refena {
     super.initState();
     ensureRef((ref) async {
       // 注册日志回调。
-      await ref.redux(logProvider).dispatch(InstallLogCallbackAction());
+      await ref.redux(logProvider).dispatchAsync(InstallLogCallbackAction());
       // 加载本设备身份（fire-and-forget）。
-      unawaited(ref.redux(deviceProvider).dispatch(LoadMyDeviceAction()));
+      unawaited(ref.redux(deviceProvider).dispatchAsync(LoadMyDeviceAction()));
       // 启动自动发现。
       ref.redux(deviceProvider).dispatch(StartDiscoveryAction());
       // 检测更新（fire-and-forget）
@@ -73,7 +73,7 @@ class _HomePageState extends State<HomePage> with Refena {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: t.home.refresh,
-            onPressed: () => unawaited(context.redux(deviceProvider).dispatch(RefreshPeersAction())),
+            onPressed: () => unawaited(context.redux(deviceProvider).dispatchAsync(RefreshPeersAction())),
           ),
           // 日志。
           IconButton(
@@ -181,13 +181,13 @@ class _HomePageState extends State<HomePage> with Refena {
 
   /// 点击设备 → 选择文件 → 发送。
   Future<void> _sendToPeer(BuildContext context, model.RsDiscoveredPeer peer) async {
-    final result = await FilePicker.platform.pickFiles(allowMultiple: false);
+    final result = await FilePicker().pickFiles(allowMultiple: false);
     if (result == null || result.files.isEmpty) return;
     final path = result.files.first.path;
     if (path == null) return;
 
     if (!context.mounted) return;
-    unawaited(context.redux(transferProvider).dispatch(
+    unawaited(context.redux(transferProvider).dispatchAsync(
       StartSendAction(peerAddress: peer.addr, filePath: path),
     ));
     showTransferProgressSheet(context);
@@ -195,7 +195,7 @@ class _HomePageState extends State<HomePage> with Refena {
 
   /// FAB：启动接收监听。
   void _startReceive(BuildContext context) {
-    unawaited(context.redux(transferProvider).dispatch(StartReceiveAction()));
+    unawaited(context.redux(transferProvider).dispatchAsync(StartReceiveAction()));
     showTransferProgressSheet(context);
   }
 
