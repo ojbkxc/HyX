@@ -238,9 +238,10 @@ impl P2PSession {
     /// flow needs.
     pub async fn resolve_peer_addr(addr_str: &str, port: u16) -> Result<SocketAddr> {
         let with_port = crate::with_default_port(addr_str, port);
-        tokio::net::lookup_host(&with_port)
+        let resolved = tokio::net::lookup_host(&with_port)
             .await
-            .map_err(Error::Network)?
+            .map_err(Error::Network)?;
+        resolved
             .next()
             .ok_or_else(|| Error::Protocol(format!("could not resolve peer address '{addr_str}'")))
     }
