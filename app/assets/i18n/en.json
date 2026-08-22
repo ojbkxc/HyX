@@ -9,6 +9,17 @@
     "noDevices": "No devices nearby",
     "noDevicesHint": "Make sure other devices have HyX open and are on the same network"
   },
+  "devices": {
+    "onlineSection": "Online Devices",
+    "historySection": "History Devices",
+    "offline": "Offline",
+    "allow": "Allow",
+    "block": "Block",
+    "delete": "Delete",
+    "emptyOnline": "No online devices",
+    "deleted": "Deleted device ${name}",
+    "deleteConfirm": "Delete device ${name}?"
+  },
   "transfer": {
     "inProgress": "Transferring",
     "cancel": "Cancel",

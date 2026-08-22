@@ -1,21 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:hyx_app/gen/strings.g.dart';
-import 'package:hyx_isolates/rust/api/model.dart' as model;
+import 'package:hyx_app/provider/device_provider.dart';
 
 /// 设备卡片。
 ///
-/// 对应 Kotlin `DevicesScreen.OnlineDeviceCard`：左侧圆形头像 + 中间名称/地址 +
-/// 右侧在线状态徽章。点击触发文件选择；桌面端拖拽由父级 [DropTarget] 统一处理，
-/// 此组件仅暴露 [onTap] 与 [onDropFiles] 回调。
+/// 同时承载在线设备与历史设备：
+/// - 在线设备（[online]=true）：正常色调，点击触发文件选择 → 发送。
+/// - 历史设备（[online]=false）：整体置灰，点击不响应；可滑动删除（由父级
+///   [HomePage] 用 [Dismissible] 包裹实现）。
 ///
-/// 简化设计：去掉 `allowTransfer` 切换按钮——HyX 默认 `allowTransfer=true`，
-/// 自动接收，不再弹确认框（参见 plan.md "比 LocalSend 更简单"）。
+/// 每张卡片底部都有一个接收/禁止切换按钮，控制是否允许接收来自此设备的
+/// 文件传输。状态持久化在 [DeviceState.knownDevices] 中。
+///
+/// 桌面端拖拽由父级 [DropTarget] 统一处理，此组件仅暴露 [onTap] 与
+/// [onDropFiles] 回调。
 class DeviceCard extends StatelessWidget {
-  /// 待渲染的 peer。`RsDiscoveredPeer` 仅含 name/addr/deviceId，故 `online` 恒真。
-  final model.RsDiscoveredPeer peer;
+  /// 待渲染的设备（含 deviceId/name/addr/allowReceive）。
+  final KnownDevice device;
 
-  /// 点击卡片：触发文件选择 → 发送。
-  final VoidCallback onTap;
+  /// 是否在线。false 时卡片置灰且不响应点击。
+  final bool online;
+
+  /// 点击卡片：触发文件选择 → 发送。null 表示不可点击（历史设备）。
+  final VoidCallback? onTap;
+
+  /// 切换接收/禁止状态。
+  final VoidCallback onToggleAllowReceive;
 
   /// 拖拽完成（桌面端）。传入拖入的文件路径列表。
   /// 移动端该回调为 null，卡片不响应拖拽。
@@ -25,8 +35,10 @@ class DeviceCard extends StatelessWidget {
   final bool dragHover;
 
   const DeviceCard({
-    required this.peer,
-    required this.onTap,
+    required this.device,
+    required this.online,
+    required this.onToggleAllowReceive,
+    this.onTap,
     this.onDropFiles,
     this.dragHover = false,
     super.key,
@@ -44,37 +56,52 @@ class DeviceCard extends StatelessWidget {
           : RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       color: dragHover ? scheme.primaryContainer : scheme.surface,
       child: InkWell(
-        onTap: onTap,
+        onTap: online ? onTap : null,
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _Avatar(name: peer.name),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+              // 上半部分：头像 + 名称/地址 + 状态徽章。
+              Opacity(
+                opacity: online ? 1.0 : 0.5,
+                child: Row(
                   children: [
-                    Text(
-                      peer.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    _Avatar(name: device.name),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            device.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            device.addr,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      peer.addr,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                    ),
+                    const SizedBox(width: 8),
+                    _StatusBadge(online: online),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              _OnlineBadge(),
+              const SizedBox(height: 10),
+              // 下半部分：接收/禁止切换按钮。
+              _AllowReceiveToggle(
+                allowReceive: device.allowReceive,
+                onChanged: onToggleAllowReceive,
+              ),
             ],
           ),
         ),
@@ -110,15 +137,22 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-/// 在线状态徽章：绿色圆点 + "在线" 文本。
-class _OnlineBadge extends StatelessWidget {
+/// 状态徽章：在线时绿色"在线"，离线时灰色"离线"。
+class _StatusBadge extends StatelessWidget {
+  final bool online;
+
+  const _StatusBadge({required this.online});
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final color = online ? scheme.primary : scheme.outline;
+    final bg = online ? scheme.primaryContainer : scheme.surfaceContainerHighest;
+    final fg = online ? scheme.onPrimaryContainer : scheme.onSurfaceVariant;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: scheme.primaryContainer,
+        color: bg,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -127,11 +161,65 @@ class _OnlineBadge extends StatelessWidget {
           Container(
             width: 6,
             height: 6,
-            decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 4),
-          Text(t.home.online, style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer)),
+          Text(
+            online ? t.home.online : t.devices.offline,
+            style: TextStyle(fontSize: 11, color: fg),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+/// 接收/禁止切换按钮。
+///
+/// 左侧图标 + 文本（✅ 接收 / ❌ 禁止），右侧 [Switch]。点击整行或 Switch
+/// 均触发 `onChanged`。
+class _AllowReceiveToggle extends StatelessWidget {
+  final bool allowReceive;
+  final VoidCallback onChanged;
+
+  const _AllowReceiveToggle({
+    required this.allowReceive,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final label = allowReceive ? t.devices.allow : t.devices.block;
+    final iconColor = allowReceive ? Colors.green : scheme.error;
+    return InkWell(
+      onTap: onChanged,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: Row(
+          children: [
+            Icon(
+              allowReceive ? Icons.check_circle : Icons.block,
+              size: 18,
+              color: iconColor,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const Spacer(),
+            Switch(
+              value: allowReceive,
+              onChanged: (_) => onChanged(),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -17,14 +17,15 @@ import 'package:refena_flutter/refena_flutter.dart';
 
 /// HyX 主页面。
 ///
-/// 简化设计（比 LocalSend 更简单）：
-/// - **无 tab 切换** — 主页就是设备列表，打开应用直接看到附近设备。
-/// - **无配对码/二维码主入口** — 局域网自动发现是唯一主流程。配对码/二维码
-///   只在跨 NAT 时作为备选（侧边栏 Drawer 入口）。
-/// - **自动接收** — allowTransfer=true 的设备自动接收文件，不弹确认框。
-/// - **拖拽发送** — 桌面端支持拖拽文件到设备卡片上发送。
-/// - **传输进度浮层** — BottomSheet 显示进度。
-/// - **历史记录在侧边栏 Drawer** — 不占主页面。
+/// 设备列表分两区显示：
+/// - **在线设备**：当前局域网发现的设备，正常色调，点击发送文件。
+/// - **历史设备**：曾经遇到但当前不在线的设备，置灰显示，可滑动删除。
+///
+/// 每个设备底部都有接收/禁止切换按钮，控制是否允许接收来自此设备的文件。
+/// 状态用 device_id（Uuid）唯一标识并持久化到 SharedPreferences。
+///
+/// 应用启动时自动开始接收监听（[StartAutoListenAction]），无需手动点 FAB，
+/// 修复"手机到电脑传不了"的问题。FAB 改为查看接收状态。
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -33,6 +34,9 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with Refena {
+  /// 传输进度浮层是否已打开，避免重复弹出。
+  bool _sheetOpen = false;
+
   @override
   void initState() {
     super.initState();
@@ -41,9 +45,13 @@ class _HomePageState extends State<HomePage> with Refena {
       await ref.redux(logProvider).dispatchAsync(InstallLogCallbackAction());
       // 加载本设备身份（fire-and-forget）。
       unawaited(ref.redux(deviceProvider).dispatchAsync(LoadMyDeviceAction()));
+      // 加载持久化的已知设备列表（含历史设备 + 接收/禁止状态）。
+      unawaited(ref.redux(deviceProvider).dispatchAsync(LoadKnownDevicesAction()));
       // 启动自动发现。
       ref.redux(deviceProvider).dispatch(StartDiscoveryAction());
-      // 检测更新（fire-and-forget）
+      // 自动启动接收监听（不需要手动点 FAB），修复手机到电脑传输问题。
+      unawaited(ref.redux(transferProvider).dispatchAsync(StartAutoListenAction()));
+      // 检测更新（fire-and-forget）。
       unawaited(_checkForUpdate());
     });
   }
@@ -53,6 +61,15 @@ class _HomePageState extends State<HomePage> with Refena {
     final scheme = Theme.of(context).colorScheme;
     final devState = context.watch(deviceProvider);
     final transferState = context.watch(transferProvider);
+
+    // 当收到传输（status 变为 transferring）时自动弹出进度浮层。
+    // 仅在浮层未打开时调度，由 [_showTransferSheet] 内部 guard 保证只弹一次。
+    if (transferState.status == model.RsTransferStatus.transferring && !_sheetOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showTransferSheet();
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -85,15 +102,20 @@ class _HomePageState extends State<HomePage> with Refena {
       ),
       drawer: _buildDrawer(context),
       body: _buildBody(context, devState),
-      floatingActionButton: transferState.busy
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () => _startReceive(context),
-              icon: const Icon(Icons.download),
-              label: Text(t.home.startReceive),
-              backgroundColor: scheme.primaryContainer,
-              foregroundColor: scheme.onPrimaryContainer,
-            ),
+      // FAB：查看接收状态 / 传输进度。
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showTransferSheet(),
+        icon: transferState.busy
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              )
+            : const Icon(Icons.wifi_tethering),
+        label: Text(transferState.busy ? t.transfer.inProgress : t.home.startReceive),
+        backgroundColor: scheme.primaryContainer,
+        foregroundColor: scheme.onPrimaryContainer,
+      ),
     );
   }
 
@@ -155,32 +177,90 @@ class _HomePageState extends State<HomePage> with Refena {
     );
   }
 
-  /// 主内容：设备列表或空状态。
+  /// 主内容：分区显示在线设备 + 历史设备。
   Widget _buildBody(BuildContext context, DeviceState devState) {
-    final peers = devState.peers;
+    final onlineDevices = devState.onlineDevices;
+    final historyDevices = devState.historyDevices;
 
-    if (peers.isEmpty) {
+    // 两者都为空：显示空状态。
+    if (onlineDevices.isEmpty && historyDevices.isEmpty) {
       return _EmptyState(scanning: devState.scanning);
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-      itemCount: peers.length,
-      itemBuilder: (_, i) {
-        final peer = peers[i];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: DeviceCard(
-            peer: peer,
-            onTap: () => _sendToPeer(context, peer),
+    final scheme = Theme.of(context).colorScheme;
+
+    // 构建列表 children：在线区域 + 历史区域。
+    final children = <Widget>[];
+
+    // 在线设备区域。
+    children.add(_SectionHeader(title: t.devices.onlineSection, count: onlineDevices.length));
+    if (onlineDevices.isEmpty) {
+      children.add(_EmptySectionHint(text: t.devices.emptyOnline));
+    } else {
+      for (final d in onlineDevices) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: DeviceCard(
+              device: d,
+              online: true,
+              onTap: () => _sendToPeer(context, d),
+              onToggleAllowReceive: () => _toggleAllow(context, d.deviceId),
+            ),
           ),
         );
-      },
+      }
+    }
+
+    // 历史设备区域（仅当非空时显示）。
+    if (historyDevices.isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(_SectionHeader(title: t.devices.historySection, count: historyDevices.length));
+      for (final d in historyDevices) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Dismissible(
+              key: ValueKey('history-${d.deviceId}'),
+              direction: DismissDirection.endToStart,
+              background: Container(
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                decoration: BoxDecoration(
+                  color: scheme.error,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.delete, color: Colors.white),
+              ),
+              confirmDismiss: (_) => _confirmDelete(context, d.name),
+              onDismissed: (_) {
+                unawaited(context.redux(deviceProvider).dispatchAsync(RemoveKnownDeviceAction(d.deviceId)));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(t.devices.deleted(d.name)),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+              child: DeviceCard(
+                device: d,
+                online: false,
+                onToggleAllowReceive: () => _toggleAllow(context, d.deviceId),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+      children: children,
     );
   }
 
-  /// 点击设备 → 选择文件 → 发送。
-  Future<void> _sendToPeer(BuildContext context, model.RsDiscoveredPeer peer) async {
+  /// 点击在线设备 → 选择文件 → 发送。
+  Future<void> _sendToPeer(BuildContext context, KnownDevice device) async {
     final result = await FilePicker.pickFiles(allowMultiple: false);
     if (result == null || result.files.isEmpty) return;
     final path = result.files.first.path;
@@ -188,15 +268,50 @@ class _HomePageState extends State<HomePage> with Refena {
 
     if (!context.mounted) return;
     unawaited(context.redux(transferProvider).dispatchAsync(
-      StartSendAction(peerAddress: peer.addr, filePath: path),
+      StartSendAction(peerAddress: device.addr, filePath: path),
     ));
-    showTransferProgressSheet(context);
+    _showTransferSheet();
   }
 
-  /// FAB：启动接收监听。
-  void _startReceive(BuildContext context) {
-    unawaited(context.redux(transferProvider).dispatchAsync(StartReceiveAction()));
-    showTransferProgressSheet(context);
+  /// 切换设备的接收/禁止状态。
+  void _toggleAllow(BuildContext context, String deviceId) {
+    unawaited(context.redux(deviceProvider).dispatchAsync(ToggleAllowReceiveAction(deviceId)));
+  }
+
+  /// 弹出传输进度浮层。
+  void _showTransferSheet() {
+    if (_sheetOpen) return;
+    _sheetOpen = true;
+    unawaited(showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => const TransferProgressSheet(),
+    ).then((_) {
+      // 浮层关闭后重置标志，允许下次传输再次弹出。
+      _sheetOpen = false;
+    }));
+  }
+
+  /// 删除历史设备的确认对话框。
+  Future<bool?> _confirmDelete(BuildContext context, String name) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t.devices.delete),
+        content: Text(t.devices.deleteConfirm(name)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(t.history.cancel)),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Theme.of(ctx).colorScheme.error),
+            child: Text(t.devices.delete),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showAbout(BuildContext context) {
@@ -240,6 +355,65 @@ class _HomePageState extends State<HomePage> with Refena {
         ));
       }
     } catch (_) {}
+  }
+}
+
+/// 分区标题：标题文本 + 设备数量徽章。
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final int count;
+
+  const _SectionHeader({required this.title, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+      child: Row(
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 空分区提示文本。
+class _EmptySectionHint extends StatelessWidget {
+  final String text;
+
+  const _EmptySectionHint({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 13, color: scheme.outline),
+      ),
+    );
   }
 }
 

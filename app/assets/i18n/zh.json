@@ -9,6 +9,17 @@
     "noDevices": "附近没有设备",
     "noDevicesHint": "请确保其他设备已打开 HyX 并在同一网络"
   },
+  "devices": {
+    "onlineSection": "在线设备",
+    "historySection": "历史设备",
+    "offline": "离线",
+    "allow": "接收",
+    "block": "禁止",
+    "delete": "删除",
+    "emptyOnline": "暂无在线设备",
+    "deleted": "已删除设备 ${name}",
+    "deleteConfirm": "确定删除设备 ${name} 吗？"
+  },
   "transfer": {
     "inProgress": "传输中",
     "cancel": "取消",

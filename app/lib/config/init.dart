@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:hyx_app/provider/device_provider.dart';
 import 'package:hyx_app/provider/history_provider.dart';
 import 'package:hyx_app/provider/log_provider.dart';
 import 'package:hyx_app/util/i18n.dart';
@@ -90,6 +91,9 @@ Future<RefenaContainer> preInit(List<String> args) async {
 
   // 启动时加载持久化的历史记录。
   unawaited(container.redux(historyProvider).dispatchAsync(LoadHistoryAction()));
+
+  // 启动时加载持久化的已知设备列表（含历史设备 + 接收/禁止状态）。
+  unawaited(container.redux(deviceProvider).dispatchAsync(LoadKnownDevicesAction()));
 
   return container;
 }

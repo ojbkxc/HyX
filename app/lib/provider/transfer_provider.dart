@@ -14,6 +14,9 @@ final _logger = Logger('TransferProvider');
 /// 对应 Kotlin `TransferProgress`：把 Rust 侧 `RsProgressEvent` 流聚合成单条
 /// 可被 UI 直接观察的状态。`startTime` 用于计算耗时；`fileName` / `peerAddress`
 /// 供历史记录使用。
+///
+/// [autoListening] 表示当前是否处于自动监听模式（应用启动后持续接收），
+/// 传输完成后会自动重启监听。
 class TransferState {
   final RsTransferDirection direction;
   final model.RsTransferStatus status;
@@ -25,6 +28,7 @@ class TransferState {
   final DateTime? startTime;
   final DateTime? endTime;
   final String? errorMessage;
+  final bool autoListening;
 
   const TransferState({
     this.direction = RsTransferDirection.send,
@@ -37,6 +41,7 @@ class TransferState {
     this.startTime,
     this.endTime,
     this.errorMessage,
+    this.autoListening = false,
   });
 
   /// 进度分数 0..1。`total == 0` 时返回 0。
@@ -66,6 +71,7 @@ class TransferState {
     DateTime? endTime,
     String? errorMessage,
     bool clearError = false,
+    bool? autoListening,
   }) =>
       TransferState(
         direction: direction ?? this.direction,
@@ -78,6 +84,7 @@ class TransferState {
         startTime: startTime ?? this.startTime,
         endTime: endTime ?? this.endTime,
         errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+        autoListening: autoListening ?? this.autoListening,
       );
 
   static const idle = TransferState();
@@ -88,6 +95,9 @@ class TransferState {
 /// 使用 [ReduxProvider]：所有 mutate 都通过 dispatch action，便于追踪 + 测试。
 /// Rust 侧 `start_listener` / `connect` / `pair_*` 通过 `StreamSink<RsProgressEvent>`
 /// 推送进度，action 内 `sink` 转 `Stream.listen` → dispatch [_UpdateProgressAction]。
+///
+/// [StartAutoListenAction] 用于应用启动时自动监听 incoming 连接（不需要用户手动
+/// 点 FAB）。传输完成后自动重启监听，实现持续接收。
 final transferProvider = ReduxProvider<TransferService, TransferState>((ref) => TransferService());
 
 class TransferService extends ReduxNotifier<TransferState> {
@@ -98,7 +108,7 @@ class TransferService extends ReduxNotifier<TransferState> {
   StreamSubscription<model.RsProgressEvent>? _sub;
 }
 
-/// 启动监听接收。
+/// 启动监听接收（手动模式，UI 显示"连接中"状态）。
 ///
 /// 对应 Rust `start_listener`：绑定 `port` + 接收对端文件到 `saveDir`。
 /// `saveDir` 为空时使用 `getApplicationDocumentsDirectory()/hyx_received`。
@@ -139,7 +149,64 @@ class StartReceiveAction extends AsyncReduxAction<TransferService, TransferState
       status: model.RsTransferStatus.connecting,
       startTime: DateTime.now(),
       clearError: true,
+
     );
+  }
+}
+
+/// 启动自动监听（应用启动时调用，不显示"连接中"状态）。
+///
+/// 与 [StartReceiveAction] 的区别：
+/// - 不把状态设为 `connecting`，保持 `idle`，避免 UI 误判为忙态。
+/// - 设 `autoListening=true`，传输完成后自动重启监听（持续接收）。
+/// - 若已有活动订阅则不重复启动。
+///
+/// 这样手机随时可以发送文件到电脑，无需用户手动点 FAB。
+class StartAutoListenAction extends AsyncReduxAction<TransferService, TransferState> {
+  final int port;
+  final int chunkBytes;
+  final int compression;
+  final String? saveDir;
+
+  StartAutoListenAction({
+    this.port = 0,
+    this.chunkBytes = 1024 * 1024,
+    this.compression = 1,
+    this.saveDir,
+  });
+
+  @override
+  Future<TransferState> reduce() async {
+    // 已有活动订阅则不重复启动。
+    if (notifier._sub != null) return state;
+    unawaited(notifier._sub?.cancel());
+
+    final dir = saveDir ?? (await _defaultSaveDir());
+
+    try {
+      final stream = rust_transfer.startListener(port: port, chunkBytes: chunkBytes, compression: compression, saveDir: dir);
+      notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
+    } catch (e) {
+      unawaited(notifier._sub?.cancel());
+      notifier._sub = null;
+      _logger.warning('auto listen failed: $e');
+      // 出错时不改变 UI 状态，仅记录日志。后续可重试。
+      return state.copyWith(autoListening: true);
+    }
+    return state.copyWith(
+      autoListening: true,
+      clearError: true,
+    );
+  }
+}
+
+/// 停止自动监听。取消订阅并清除 autoListening 标志。
+class StopAutoListenAction extends ReduxAction<TransferService, TransferState> {
+  @override
+  TransferState reduce() {
+    unawaited(notifier._sub?.cancel());
+    notifier._sub = null;
+    return state.copyWith(autoListening: false);
   }
 }
 
@@ -186,6 +253,7 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
       peerAddress: peerAddress,
       startTime: DateTime.now(),
       clearError: true,
+
     );
   }
 }
@@ -231,6 +299,7 @@ class StartPairReceiveAction extends AsyncReduxAction<TransferService, TransferS
       peerAddress: server,
       startTime: DateTime.now(),
       clearError: true,
+
     );
   }
 }
@@ -278,11 +347,14 @@ class StartPairSendAction extends AsyncReduxAction<TransferService, TransferStat
       peerAddress: server,
       startTime: DateTime.now(),
       clearError: true,
+
     );
   }
 }
 
 /// 取消当前传输。对应 Rust `cancel`。
+///
+/// 自动监听模式下，取消后重启监听以持续接收下一次传输。
 class CancelTransferAction extends ReduxAction<TransferService, TransferState> {
   @override
   TransferState reduce() {
@@ -294,6 +366,10 @@ class CancelTransferAction extends ReduxAction<TransferService, TransferState> {
     }
     unawaited(notifier._sub?.cancel());
     notifier._sub = null;
+    // 自动监听模式下，取消后重启监听。
+    if (state.autoListening) {
+      unawaited(dispatchAsync(StartAutoListenAction()));
+    }
     return state.copyWith(
       status: model.RsTransferStatus.cancelled,
       endTime: DateTime.now(),
@@ -302,16 +378,27 @@ class CancelTransferAction extends ReduxAction<TransferService, TransferState> {
 }
 
 /// 重置回 idle（终态后由 UI 调用）。
+///
+/// 若处于自动监听模式，[_UpdateProgressAction] 已在终态时重启了监听订阅，
+/// 此处不再 cancel/restart，仅重置 UI 状态。非自动监听模式下才 cancel 订阅。
 class ResetTransferAction extends ReduxAction<TransferService, TransferState> {
   @override
   TransferState reduce() {
-    unawaited(notifier._sub?.cancel());
-    notifier._sub = null;
-    return TransferState.idle;
+    final wasAutoListening = state.autoListening;
+    if (!wasAutoListening) {
+      // 非自动监听模式：取消订阅。
+      unawaited(notifier._sub?.cancel());
+      notifier._sub = null;
+    }
+    // 自动监听模式：保留 _sub（_UpdateProgressAction 已重启监听）。
+    return TransferState.idle.copyWith(autoListening: wasAutoListening);
   }
 }
 
 /// 内部：处理 RsProgressEvent。
+///
+/// 当事件为终态（completed/failed/cancelled）时取消订阅。若处于自动监听模式，
+/// 终态后自动重启监听以持续接收下一次传输。
 class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> {
   final model.RsProgressEvent event;
 
@@ -325,12 +412,26 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
     if (isDone) {
       unawaited(notifier._sub?.cancel());
       notifier._sub = null;
+      // 自动监听模式下，传输完成后重启监听。
+      if (state.autoListening) {
+        unawaited(dispatchAsync(StartAutoListenAction()));
+      }
     }
+    // 自动监听接收时 startTime 未在 action 中设置，首次收到 transferring 事件时补上，
+    // 确保 [TransferProgressSheet] 能正确计算耗时与添加历史记录。
+    final shouldSetStart = state.startTime == null &&
+        event.status == model.RsTransferStatus.transferring;
+    // 同步传输方向（event.direction 是 FRB 类型，需映射到 Dart 侧枚举）。
+    final dir = event.direction == model.RsTransferDirection.send
+        ? RsTransferDirection.send
+        : RsTransferDirection.receive;
     return state.copyWith(
+      direction: dir,
       status: event.status,
       transferred: event.transferred.toInt(),
       total: event.total.toInt(),
       speed: event.speed,
+      startTime: shouldSetStart ? DateTime.now() : null,
       endTime: isDone ? DateTime.now() : null,
       errorMessage: event.message,
     );
