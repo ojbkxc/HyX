@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:hyx_app/provider/device_provider.dart';
 import 'package:hyx_app/util/transfer_direction.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:hyx_isolates/rust/api/transfer.dart' as rust_transfer;
@@ -98,14 +99,37 @@ class TransferState {
 ///
 /// [StartAutoListenAction] 用于应用启动时自动监听 incoming 连接（不需要用户手动
 /// 点 FAB）。传输完成后自动重启监听，实现持续接收。
-final transferProvider = ReduxProvider<TransferService, TransferState>((ref) => TransferService());
+///
+/// 通过构造函数注入 [DeviceService]（Refena 推荐的依赖注入方式），使 action 能
+/// 读取 [DeviceState.blockedDeviceIds] 并同步到 Rust 侧。
+final transferProvider = ReduxProvider<TransferService, TransferState>((ref) {
+  return TransferService(ref.notifier(deviceProvider));
+});
 
 class TransferService extends ReduxNotifier<TransferState> {
+  /// 设备状态 notifier，用于在 action 内读取被禁止的设备 ID 列表。
+  final DeviceService _deviceService;
+
+  TransferService(this._deviceService);
+
   @override
   TransferState init() => TransferState.idle;
 
   /// 当前活动的进度流订阅，cancel / 完成后取消。
   StreamSubscription<model.RsProgressEvent>? _sub;
+
+  /// 把 [DeviceProvider] 中 `allowReceive == false` 的设备 ID 列表同步到 Rust 侧。
+  ///
+  /// 在每次启动监听前调用，使 Rust `receive_into` 能按发送方设备 ID 拒收被禁止的设备。
+  /// fire-and-forget：失败仅记日志，不阻塞监听启动（最坏情况是 Rust 侧沿用上一次列表）。
+  void _syncBlockedDevices() {
+    try {
+      final blockedIds = _deviceService.state.blockedDeviceIds;
+      rust_transfer.setBlockedDevices(ids: blockedIds);
+    } catch (e) {
+      _logger.warning('setBlockedDevices failed: $e');
+    }
+  }
 }
 
 /// 启动监听接收（手动模式，UI 显示"连接中"状态）。
@@ -129,6 +153,9 @@ class StartReceiveAction extends AsyncReduxAction<TransferService, TransferState
   Future<TransferState> reduce() async {
     if (state.busy) return state;
     unawaited(notifier._sub?.cancel());
+
+    // 启动监听前把当前禁止列表同步到 Rust，使 receive_into 能按设备 ID 拒收。
+    notifier._syncBlockedDevices();
 
     final dir = saveDir ?? (await _defaultSaveDir());
 
@@ -180,6 +207,9 @@ class StartAutoListenAction extends AsyncReduxAction<TransferService, TransferSt
     // 已有活动订阅则不重复启动。
     if (notifier._sub != null) return state;
     unawaited(notifier._sub?.cancel());
+
+    // 启动监听前把当前禁止列表同步到 Rust，使 receive_into 能按设备 ID 拒收。
+    notifier._syncBlockedDevices();
 
     final dir = saveDir ?? (await _defaultSaveDir());
 

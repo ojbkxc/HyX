@@ -159,6 +159,20 @@ class DeviceState {
     return known?.allowReceive ?? true;
   }
 
+  /// 返回所有被禁止接收的设备 ID 列表（`allowReceive == false`）。
+  ///
+  /// 由 [TransferProvider] 在启动监听前调用，通过
+  /// `rust_transfer.setBlockedDevices` 同步到 Rust 侧，使 `receive_into`
+  /// 能按发送方设备 ID 拒收。仅遍历 [knownDevices]（持久化记录），
+  /// 不含未加入已知表的瞬态在线设备（其默认 `allowReceive=true`）。
+  List<String> get blockedDeviceIds {
+    final result = <String>[];
+    for (final d in knownDevices.values) {
+      if (!d.allowReceive) result.add(d.deviceId);
+    }
+    return result;
+  }
+
   static const initial = DeviceState();
 }
 
@@ -314,9 +328,9 @@ class RefreshPeersAction extends AsyncReduxAction<DeviceService, DeviceState> {
 
 /// 切换设备的接收/禁止状态。设备必须在 [DeviceState.knownDevices] 中。
 ///
-/// 注意：当前 Rust 侧 `start_listener` 无条件接受所有连接（无法获取发送方
-/// device_id），因此此状态目前仅作持久化记录，未来 Rust 侧支持按 device_id
-/// 过滤后即可生效。
+/// 切换后由调用方（通常是 [TransferProvider] 在下一次启动监听前）通过
+/// `rust_transfer.setBlockedDevices` 把最新禁止列表同步到 Rust 侧，
+/// `receive_into` 会按发送方设备 ID 拒收被禁止的设备。
 class ToggleAllowReceiveAction extends AsyncReduxAction<DeviceService, DeviceState> {
   final String deviceId;
 

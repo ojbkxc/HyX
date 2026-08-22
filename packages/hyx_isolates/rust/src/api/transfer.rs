@@ -13,6 +13,7 @@
 //!   `cancel()` 调用 `AbortHandle::abort`。
 //! - **运行时**：mobile 用全局 `RT: OnceLock<Runtime>`；FRB 版本同样使用全局多线程 runtime。
 
+use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -53,6 +54,27 @@ fn track(handle: AbortHandle) {
 
 fn forget_active() {
     *ACTIVE.lock().expect("active lock") = None;
+}
+
+/// 被禁止接收的设备 ID 列表（由 Dart 侧 `DeviceProvider` 同步）。
+///
+/// - `None`：尚未设置过，视为"无过滤"，保持向后兼容（所有设备都被允许）。
+/// - `Some(set)`：集合中的设备 ID（Uuid 字符串）会被 `receive_into` 拒收。
+///
+/// 使用全局 `Mutex` 而非 `RwLock`：写入仅在用户切换 UI 开关时发生（低频），
+/// 读取发生在每次接收开始时；`Mutex` 在此负载下足够简单且无锁争用。
+static BLOCKED_DEVICES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// 更新被禁止接收的设备 ID 列表。对应 Dart 侧 `DeviceProvider.allowReceive == false` 的设备。
+///
+/// 由 Dart 侧在 `StartAutoListenAction` / `StartReceiveAction` 触发，传入当前完整的
+/// 禁止列表（全量替换而非增量）。fire-and-forget：调用方不等待返回。
+///
+/// # Arguments
+/// - `ids`：被禁止的设备 ID（Uuid 字符串）列表。空列表表示"无禁止"。
+#[frb]
+pub fn set_blocked_devices(ids: Vec<String>) {
+    *BLOCKED_DEVICES.lock().expect("blocked lock") = Some(ids.into_iter().collect());
 }
 
 /// 将 FFI `compression` 旋钮（0=off, 1=adaptive, 2=always）映射到 `ConfigMessage`。
@@ -120,11 +142,33 @@ fn progress_sink(
 }
 
 /// 接收对端发来的文件到 `dir`。对应 mobile `receive_into`。
+///
+/// 在调用 `receive_to` 前先检查发送方设备 ID 是否在 [`BLOCKED_DEVICES`] 中：
+/// 若被禁止则向 `sink` 推送 `Failed` 事件并返回 `Err`，不进入实际传输流程。
+/// 这样被禁止的设备连一个 chunk 都不会写入磁盘。
 async fn receive_into(
     session: &mut P2PSession,
     dir: &str,
     sink: &StreamSink<RsProgressEvent>,
 ) -> Result<()> {
+    // 取发送方设备 ID（Uuid 字符串），与 Dart 侧 KnownDevice.deviceId 比对。
+    let peer_id = session.peer_device_id().to_string();
+    {
+        let blocked = BLOCKED_DEVICES.lock().expect("blocked lock");
+        if let Some(set) = blocked.as_ref() {
+            if set.contains(&peer_id) {
+                let msg = format!("设备 {peer_id} 已被禁止接收");
+                emit_final(
+                    sink,
+                    RsTransferStatus::Failed,
+                    Some(msg),
+                    RsTransferDirection::Receive,
+                );
+                return Err(anyhow::anyhow!("blocked device: {peer_id}"));
+            }
+        }
+    }
+
     let out = PathBuf::from(dir);
     let mut prog = ProgressState::new(0);
     prog.set_progress_callback(progress_sink(sink.clone(), RsTransferDirection::Receive));
