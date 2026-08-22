@@ -100,6 +100,10 @@ jobs:
         working-directory: ${{ env.APK_BUILD_DIR }}/packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
 
+      - name: 生成 i18n 代码
+        working-directory: ${{ env.APK_BUILD_DIR }}/app
+        run: dart run slang
+
       - name: 构建 APK（split-per-abi）
         working-directory: ${{ env.APK_BUILD_DIR }}/app
         run: flutter build apk --split-per-abi --release
@@ -155,6 +159,10 @@ jobs:
       - name: 生成 FRB 绑定
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
+
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
 
       - name: 编译 Linux
         working-directory: app
@@ -215,6 +223,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
 
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
+
       - name: 编译 Linux
         working-directory: app
         run: flutter build linux --release
@@ -274,6 +286,10 @@ jobs:
       - name: 生成 FRB 绑定
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
+
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
 
       - name: 构建 deb 包
         working-directory: app
@@ -342,6 +358,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
 
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
+
       - name: 构建 deb 包
         working-directory: app
         run: PATH="$PATH:$HOME/.pub-cache/bin" flutter_distributor package --platform linux --targets deb
@@ -408,6 +428,10 @@ jobs:
       - name: 生成 FRB 绑定
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
+
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
 
       - name: 编译 Linux
         working-directory: app
@@ -482,6 +506,10 @@ jobs:
       - name: 生成 FRB 绑定
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
+
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
 
       - name: 编译 Windows
         working-directory: app
@@ -560,6 +588,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
 
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
+
       - name: 编译 Windows
         working-directory: app
         run: flutter build windows --release
@@ -628,6 +660,10 @@ jobs:
       - name: 生成 FRB 绑定
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
+
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
 
       - name: 编译 Windows
         working-directory: app
@@ -701,6 +737,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
 
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
+
       - name: 编译 macOS
         working-directory: app
         run: flutter build macos --release
@@ -756,6 +796,10 @@ jobs:
       - name: 生成 FRB 绑定
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
+
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
 
       - name: 编译 iOS（无签名）
         working-directory: app

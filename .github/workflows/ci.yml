@@ -70,6 +70,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: flutter_rust_bridge_codegen generate
 
+      - name: 生成 i18n 代码
+        working-directory: app
+        run: dart run slang
+
       - name: Analyze (app)
         working-directory: app
         run: flutter analyze
