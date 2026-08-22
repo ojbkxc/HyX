@@ -54,7 +54,7 @@ final deviceProvider = ReduxProvider<DeviceService, DeviceState>((ref) => Device
 
 class DeviceService extends ReduxNotifier<DeviceState> {
   @override
-  DeviceState init() => const DeviceState.initial;
+  DeviceState init() => DeviceState.initial;
 
   /// 定时刷新计时器。
   Timer? _timer;
