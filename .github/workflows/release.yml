@@ -85,6 +85,10 @@ jobs:
         working-directory: ${{ env.APK_BUILD_DIR }}/packages/hyx_isolates
         run: rustup show
 
+      - name: 生成平台配置
+        working-directory: ${{ env.APK_BUILD_DIR }}/app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
       - name: 依赖
         working-directory: ${{ env.APK_BUILD_DIR }}/app
         run: flutter pub get
@@ -136,6 +140,10 @@ jobs:
       - name: 检查 rust-toolchain.toml
         working-directory: packages/hyx_isolates
         run: rustup show
+
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
       - name: 依赖
         working-directory: app
@@ -192,6 +200,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: rustup show
 
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
       - name: 依赖
         working-directory: app
         run: flutter pub get
@@ -245,6 +257,10 @@ jobs:
       - name: 检查 rust-toolchain.toml
         working-directory: packages/hyx_isolates
         run: rustup show
+
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
       - name: 启用 flutter_distributor
         run: dart pub global activate flutter_distributor
@@ -312,6 +328,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: rustup show
 
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
       - name: 启用 flutter_distributor
         run: dart pub global activate flutter_distributor
 
@@ -373,6 +393,10 @@ jobs:
       - name: 检查 rust-toolchain.toml
         working-directory: packages/hyx_isolates
         run: rustup show
+
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
       - name: 依赖
         working-directory: app
@@ -443,6 +467,10 @@ jobs:
       - name: 检查 rust-toolchain.toml
         working-directory: packages/hyx_isolates
         run: rustup show
+
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
       - name: 依赖
         working-directory: app
@@ -517,6 +545,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: rustup show
 
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
       - name: 依赖
         working-directory: app
         run: flutter pub get
@@ -581,6 +613,10 @@ jobs:
       - name: 检查 rust-toolchain.toml
         working-directory: packages/hyx_isolates
         run: rustup show
+
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
       - name: 依赖
         working-directory: app
@@ -650,6 +686,10 @@ jobs:
         working-directory: packages/hyx_isolates
         run: rustup show
 
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
       - name: 依赖
         working-directory: app
         run: flutter pub get
@@ -701,6 +741,10 @@ jobs:
       - name: 检查 rust-toolchain.toml
         working-directory: packages/hyx_isolates
         run: rustup show
+
+      - name: 生成平台配置
+        working-directory: app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
       - name: 依赖
         working-directory: app
