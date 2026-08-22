@@ -13,12 +13,37 @@
     <string name="pair_code">Pairing Code</string>
     <string name="pair_scan">Scan</string>
     <string name="pair_lan">LAN Discovery</string>
+    <string name="pair_share">Pick a file to share via QR</string>
+    <string name="pair_scan_receive">Scan to receive</string>
+    <string name="pair_input_code">Enter pairing code</string>
+    <string name="pair_qr_title">Let the peer scan this QR code</string>
+    <string name="pair_waiting">Waiting for peer to pair…</string>
+    <string name="pair_code_placeholder">Enter the peer\'s pairing code</string>
+    <string name="pair_scan_prompt">Aim at the peer\'s pairing QR code</string>
+    <string name="pair_confirm">Confirm</string>
+    <string name="pair_cancel">Cancel</string>
     <string name="send_files_label">Pick a file to send</string>
     <string name="start_receive">Start Receiving</string>
     <string name="cancel">Cancel</string>
     <string name="engine">Engine</string>
     <string name="engine_compression">Streaming compression (zstd, adaptive)</string>
     <string name="engine_aggregation">Stream aggregation (batch write)</string>
+
+    <!-- Logs -->
+    <string name="log_title">Logs</string>
+    <string name="log_copy">Copy</string>
+    <string name="log_export">Export</string>
+    <string name="log_clear">Clear</string>
+    <string name="log_copied">Logs copied to clipboard</string>
+    <string name="log_exported">Logs exported</string>
+    <string name="log_export_failed">Export failed</string>
+    <string name="log_cleared">Logs cleared</string>
+    <string name="log_empty">No logs yet</string>
+    <string name="log_filter_all">All</string>
+
+    <!-- QR code -->
+    <string name="qr_pair_hint">Scan with the other phone to pair</string>
+    <string name="qr_scan_prompt">Aim at the peer\'s pairing QR code</string>
 
     <!-- Progress -->
     <string name="speed">Speed</string>
