@@ -1,6 +1,6 @@
 //! Receive operations.
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -221,6 +221,12 @@ fn log_new_peer(session: &P2PSession) {
 fn accept_or_prompt(auto_accept: bool, info: &TransferInfo) -> AcceptDecision {
     if auto_accept {
         return AcceptDecision::Accept;
+    }
+    // Interactive prompt requires a TTY. When stdin is redirected or closed
+    // (background run, /dev/null, CI), reading would block forever, so reject.
+    if !std::io::stdin().is_terminal() {
+        warn!("stdin is not a terminal; rejecting incoming transfer (use --auto-accept to accept silently)");
+        return AcceptDecision::Reject;
     }
     let total: u64 = info.items.iter().map(|f| f.size).sum();
     let first = info.items.first().map(|f| f.path.as_str()).unwrap_or("?");

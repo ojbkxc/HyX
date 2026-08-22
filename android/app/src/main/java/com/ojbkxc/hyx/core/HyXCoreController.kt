@@ -408,6 +408,12 @@ class HyXCoreController : ViewModel() {
 
     override fun onCleared() {
         transferJob?.cancel()
+        if (_status.value in setOf(TransferStatus.Connecting, TransferStatus.Pairing, TransferStatus.Transferring)) {
+            // cancel() only aborts the coroutine; a transfer currently blocked
+            // in a native call keeps running until it finishes. Abort the
+            // native side too so no background receive continues after the VM dies.
+            HyXNative.hyxCancel()
+        }
         super.onCleared()
     }
 }

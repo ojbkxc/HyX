@@ -103,11 +103,35 @@ fn config_from(chunk_bytes: jint, compression: jint) -> ConfigMessage {
 }
 
 /// Progress callback that mirrors bytes into the JNI event channel.
+///
+/// Throttled to ~5 Hz with a sliding-window rate so the Android UI isn't
+/// flooded with one callback per chunk and the shown speed/ETA reflects the
+/// recent pace rather than a lifetime average. `ProgressCallback` is `Fn`, so
+/// the throttle state sits behind a mutex captured by the closure.
 fn progress_sink(tx: std::sync::mpsc::Sender<Evt>) -> ProgressCallback {
-    let t0 = Instant::now();
+    struct Throttle {
+        last_emit: Instant,
+        last_done: u64,
+    }
+    let throttle = std::sync::Arc::new(std::sync::Mutex::new(Throttle {
+        last_emit: Instant::now(),
+        last_done: 0,
+    }));
     Box::new(move |done, total| {
-        let el = t0.elapsed().as_secs_f64();
-        let rate = if el > 0.0 { (done as f64) / el } else { 0.0 };
+        let mut st = throttle.lock().unwrap_or_else(|p| p.into_inner());
+        let now = Instant::now();
+        let el = now.duration_since(st.last_emit);
+        if el < Duration::from_millis(200) {
+            return;
+        }
+        let rate = if el.as_secs_f64() > 0.0 {
+            (done.saturating_sub(st.last_done)) as f64 / el.as_secs_f64()
+        } else {
+            0.0
+        };
+        st.last_emit = now;
+        st.last_done = done;
+        drop(st);
         let _ = tx.send(Evt::Progress(done, total, rate as i64));
     })
 }

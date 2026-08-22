@@ -238,7 +238,7 @@ impl P2PSession {
     /// flow needs.
     pub async fn resolve_peer_addr(addr_str: &str, port: u16) -> Result<SocketAddr> {
         let with_port = crate::with_default_port(addr_str, port);
-        let resolved = tokio::net::lookup_host(&with_port)
+        let mut resolved = tokio::net::lookup_host(&with_port)
             .await
             .map_err(Error::Network)?;
         resolved
@@ -405,6 +405,7 @@ impl P2PSession {
                     if !e.is_recoverable() {
                         warn!("Non-recoverable error, not retrying: {}", e);
                         if let Some(state_file) = state_path {
+                            state.clear_chunk_bitmaps();
                             let _ = state.save_to_file(state_file).await;
                         }
                         return Err(e);
@@ -416,6 +417,7 @@ impl P2PSession {
                             reconnect_config.max_attempts
                         );
                         if let Some(state_file) = state_path {
+                            state.clear_chunk_bitmaps();
                             let _ = state.save_to_file(state_file).await;
                         }
                         return Err(Error::Protocol(format!(
@@ -434,6 +436,7 @@ impl P2PSession {
                     );
 
                     if let Some(state_file) = state_path {
+                        state.clear_chunk_bitmaps();
                         if let Err(save_err) = state.save_to_file(state_file).await {
                             warn!("Failed to save state to disk: {}", save_err);
                         }
