@@ -92,7 +92,7 @@ final transferProvider = ReduxProvider<TransferService, TransferState>((ref) => 
 
 class TransferService extends ReduxNotifier<TransferState> {
   @override
-  TransferState init() => const TransferState.idle;
+  TransferState init() => TransferState.idle;
 
   /// 当前活动的进度流订阅，cancel / 完成后取消。
   StreamSubscription? _sub;
@@ -126,7 +126,7 @@ class StartReceiveAction extends AsyncReduxAction<TransferService, TransferState
     notifier._sub = sub;
 
     try {
-      rust_transfer.startListener(port, chunkBytes, compression, dir, sink);
+      rust_transfer.startListener(port: port, chunkBytes: chunkBytes, compression: compression, saveDir: dir, sink: sink);
     } catch (e) {
       notifier._sub?.cancel();
       notifier._sub = null;
@@ -174,7 +174,7 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
 
     final name = filePath.split(RegExp(r'[/\\]')).last;
     try {
-      rust_transfer.connect(peerAddress, filePath, chunkBytes, compression, port, sink);
+      rust_transfer.connect(peerAddress: peerAddress, filePath: filePath, chunkBytes: chunkBytes, compression: compression, port: port, sink: sink);
     } catch (e) {
       notifier._sub?.cancel();
       notifier._sub = null;
@@ -222,7 +222,7 @@ class StartPairReceiveAction extends AsyncReduxAction<TransferService, TransferS
     notifier._sub = sub;
 
     try {
-      rust_transfer.pairRendezvous(code, server, port, compression, dir, sink);
+      rust_transfer.pairRendezvous(code: code, server: server, port: port, compression: compression, saveDir: dir, sink: sink);
     } catch (e) {
       notifier._sub?.cancel();
       notifier._sub = null;
@@ -271,7 +271,7 @@ class StartPairSendAction extends AsyncReduxAction<TransferService, TransferStat
 
     final name = filePath.split(RegExp(r'[/\\]')).last;
     try {
-      rust_transfer.pairSend(code, server, port, filePath, chunkBytes, compression, sink);
+      rust_transfer.pairSend(code: code, server: server, port: port, filePath: filePath, chunkBytes: chunkBytes, compression: compression, sink: sink);
     } catch (e) {
       notifier._sub?.cancel();
       notifier._sub = null;
@@ -317,7 +317,7 @@ class ResetTransferAction extends ReduxAction<TransferService, TransferState> {
   TransferState reduce() {
     notifier._sub?.cancel();
     notifier._sub = null;
-    return const TransferState.idle;
+    return TransferState.idle;
   }
 }
 
@@ -338,8 +338,8 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
     }
     return state.copyWith(
       status: event.status,
-      transferred: event.transferred,
-      total: event.total,
+      transferred: event.transferred.toInt(),
+      total: event.total.toInt(),
       speed: event.speed,
       endTime: isDone ? DateTime.now() : null,
       errorMessage: event.message,

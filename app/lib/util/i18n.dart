@@ -14,9 +14,9 @@ Future<void> initI18n() async {
   try {
     // 取系统 locale 的语言代码，匹配 slang 编译期已知的 locale。
     final systemLang = ui.PlatformDispatcher.instance.locale.languageCode;
-    final locale = t.locales.firstWhere(
+    final locale = AppLocaleUtils.supportedLocales.firstWhere(
       (l) => l.languageCode == systemLang,
-      orElse: () => t.locales.first,
+      orElse: () => AppLocaleUtils.supportedLocales.first,
     );
     LocaleSettings.setLocale(locale);
   } catch (e) {

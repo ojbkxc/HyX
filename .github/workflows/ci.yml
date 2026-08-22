@@ -44,7 +44,9 @@ jobs:
 
       - name: 检查格式 (app)
         working-directory: app
-        run: dart format --set-exit-if-changed lib test
+        run: |
+          dart format lib test
+          git diff --exit-code
 
   # ─────────────────────────────────────────────────────────────
   # Flutter analyze + test（app 与 hyx_isolates）
@@ -130,7 +132,9 @@ jobs:
         run: flutter_rust_bridge_codegen generate
 
       - name: Fmt
-        run: cargo fmt --all -- --check
+        run: |
+          cargo fmt --all
+          git diff --exit-code -- '*.rs' ':!packages/hyx_isolates/rust/src/frb_generated.rs'
 
       # core 是 P2P 传输内核，运行完整 clippy + test
       - name: Clippy (core)
