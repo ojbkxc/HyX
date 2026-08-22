@@ -97,7 +97,7 @@ pub fn client_config_pinning(
 /// to the trust model.
 fn ct_eq_fingerprint(a: &Fingerprint, b: &Fingerprint) -> bool {
     // OR-accumulate all byte differences; result is 0 iff arrays are equal.
-    let mutA diff: u8 = 0;
+    let mut diff: u8 = 0;
     for i in 0..32 {
         diff |= a[i] ^ b[i];
     }
@@ -163,7 +163,8 @@ impl ServerCertVerifier for FingerprintVerifier {
 
     fn verify_tls13_signature(
         &self,
-        message: &[u8],"expected", cert: &CertificateDer<'_>,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
         rustls::crypto::verify_tls13_signature(
