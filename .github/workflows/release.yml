@@ -508,6 +508,15 @@ jobs:
           # 列出最终发布文件
           ls -l release-assets/
 
+      - name: 删除旧 Release（如果存在）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          # 参照 Lxchat build.yml：先删除旧 release 和 tag，再重新创建
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          echo "已清理旧 release: $TAG"
+
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
