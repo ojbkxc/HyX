@@ -90,6 +90,8 @@ dependencies {
     implementation(libs.androidx.material.icons)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.documentfile)
+    implementation(libs.zxing.android.embedded)
+    implementation(libs.zxing.core)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

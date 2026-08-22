@@ -87,13 +87,44 @@ object HyXNative {
         onProgress: ProgressCallback
     ): String?
 
+    /** Rendezvous pairing, then send [filePath] to the paired peer. Sender
+     *  side of a code/QR share. */
+    external fun hyxPairSend(
+        code: String,
+        serverAddress: String,
+        port: Int,
+        filePath: String,
+        chunkBytes: Int,
+        compression: Int,
+        aggregation: Int,
+        onProgress: ProgressCallback
+    ): String?
+
     external fun hyxCancel(): String?
 
     /** Real LAN discovery; returns newline-joined `"name\tip:port"` lines ("" if none found). */
     external fun hyxDiscover(port: Int): String?
 
+    /**
+     * Register a global Rust log callback. Must be called after [ensureLoaded]
+     * (i.e. once `libhyx_mobile.so` is loaded) and before any other native call
+     * that might emit a `tracing` event. Installs a process-global
+     * `tracing-subscriber` Layer that forwards every Rust log event to [callback].
+     */
+    external fun hyxSetLogCallback(callback: LogCallback)
+
     fun interface ProgressCallback {
         /** Mirrors Rust-native progress: phase, bytes done, bytes total, speed B/s. */
         fun onProgress(phase: Int, transferred: Long, total: Long, speed: Long)
+    }
+
+    fun interface LogCallback {
+        /**
+         * Rust tracing log callback.
+         * @param level   0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR
+         * @param tag     tracing target (usually the module path, e.g. "hyx_mobile")
+         * @param message formatted log message
+         */
+        fun onLog(level: Int, tag: String, message: String)
     }
 }

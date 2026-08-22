@@ -26,11 +26,13 @@ use hyx_core::session::P2PSession;
 use hyx_core::transfer_folder::AcceptDecision;
 use hyx_core::Uuid;
 use hyx_core::DEFAULT_RENDEZVOUS_PORT;
-use jni::objects::{JObject, JValue};
+use jni::objects::{GlobalRef, JObject, JValue};
 use jni::sys::{jint, jlong, jobject};
-use jni::JNIEnv;
+use jni::{JNIEnv, JavaVM};
 use tokio::runtime::{Builder, Runtime};
 use tokio::task::AbortHandle;
+use tracing_subscriber::field::Visit;
+use tracing_subscriber::layer::{Context, Layer};
 
 /// Event a JNI call waits on from the background transfer task.
 enum Evt {
@@ -269,6 +271,136 @@ fn bind_addr(port: jint) -> SocketAddr {
 }
 
 // ---------------------------------------------------------------------------
+// Rust tracing → JNI log callback
+// ---------------------------------------------------------------------------
+//
+// `tracing::event!` calls (e.g. the `tracing::warn!` in `discover_peers` and
+// `hyxStartListener`) are forwarded to Kotlin through a global `LogCallback`
+// registered via `hyxSetLogCallback`. The path is:
+//
+//   tracing::event!
+//     → JniLogLayer::on_event           (tracing-subscriber Layer)
+//     → attach_current_thread()         (JNIEnv for this thread)
+//     → callback.onLog(level, tag, msg) (JNI call_method)
+//     → LogCollector.add(LogEntry)      (Kotlin side)
+//
+// `JavaVM` + `GlobalRef` are `Send + Sync` and storable in `OnceLock`; we never
+// hold a `JNIEnv` across threads — each event re-attaches (a no-op if already
+// attached) and clears any pending exception so the next event isn't blocked.
+
+/// Global JavaVM reference, set once in `hyxSetLogCallback`. Tracing events fire
+/// on arbitrary Tokio worker threads, so we keep the `JavaVM` (not a `JNIEnv`)
+/// and `attach_current_thread()` per event.
+static JVM: OnceLock<JavaVM> = OnceLock::new();
+
+/// Global log callback reference (Kotlin `LogCallback` wrapped in `GlobalRef`).
+/// `GlobalRef` survives GC and is `Send + Sync`, safe to invoke from any thread
+/// after attaching. Held for the process lifetime — the log callback is unique
+/// and never replaced.
+static LOG_CB: OnceLock<GlobalRef> = OnceLock::new();
+
+/// `tracing-subscriber` Layer that forwards every event to Kotlin via JNI.
+struct JniLogLayer;
+
+impl<S: tracing_core::Subscriber> Layer<S> for JniLogLayer {
+    fn on_event(&self, event: &tracing_core::Event<'_>, _ctx: Context<'_, S>) {
+        let Some(vm) = JVM.get() else { return };
+        let Some(cb) = LOG_CB.get() else { return };
+
+        let level = level_to_int(event.metadata().level());
+        let target = event.metadata().target();
+
+        // Collect the "message" field plus any extras as `key=value`.
+        let mut visitor = FieldCollector::default();
+        event.record(&mut visitor);
+        let message = visitor.finish();
+
+        // `attach_current_thread` is a no-op when the thread is already
+        // attached, so calling it on every event is cheap and safe.
+        let Ok(mut env) = vm.attach_current_thread() else {
+            return;
+        };
+        let Ok(jtag) = env.new_string(target) else {
+            return;
+        };
+        let Ok(jmsg) = env.new_string(&message) else {
+            return;
+        };
+        let _ = env.call_method(
+            cb.as_obj(),
+            "onLog",
+            "(ILjava/lang/String;Ljava/lang/String;)V",
+            &[
+                JValue::Int(level),
+                JValue::Object(&jtag),
+                JValue::Object(&jmsg),
+            ],
+        );
+        // Clear any exception thrown by the Kotlin callback so subsequent JNI
+        // calls (more log events) don't silently fail with a pending exception.
+        let _ = env.exception_clear();
+    }
+}
+
+/// Map a `tracing` `Level` to the int ordinal expected by Kotlin's
+/// `LogLevel` enum (0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR).
+fn level_to_int(l: &tracing_core::Level) -> jint {
+    use tracing_core::Level;
+    match l {
+        Level::TRACE => 0,
+        Level::DEBUG => 1,
+        Level::INFO => 2,
+        Level::WARN => 3,
+        Level::ERROR => 4,
+    }
+}
+
+/// `tracing` field visitor that collects the conventional `"message"` field
+/// verbatim and formats every other field as `name=value`. Used by
+/// `JniLogLayer::on_event` to reconstruct a single human-readable string from
+/// the event's structured fields.
+#[derive(Default)]
+struct FieldCollector {
+    message: String,
+    extras: Vec<String>,
+}
+
+impl Visit for FieldCollector {
+    fn record_debug(&mut self, field: &tracing_core::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value);
+        } else {
+            self.extras.push(format!("{}={:?}", field.name(), value));
+        }
+    }
+
+    // Explicit `record_str` avoids the Debug quoting (`"..."`) that
+    // `record_debug` would add for string fields, keeping messages clean.
+    fn record_str(&mut self, field: &tracing_core::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        } else {
+            self.extras.push(format!("{}={}", field.name(), value));
+        }
+    }
+}
+
+impl FieldCollector {
+    /// Join the collected message and extras into a single string. The message
+    /// (if any) comes first, followed by `key=value` pairs separated by spaces.
+    fn finish(mut self) -> String {
+        if self.extras.is_empty() {
+            self.message
+        } else if self.message.is_empty() {
+            self.extras.join(" ")
+        } else {
+            self.extras.insert(0, self.message);
+            self.extras.join(" ")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // FFI entry points (symbols must match HyXNative.kt method names).
 // ---------------------------------------------------------------------------
 
@@ -497,6 +629,79 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxPairRendezvous<'loc
     out
 }
 
+/// `String hyxPairSend(String code, String serverAddress, int port,
+/// String filePath, int chunkBytes, int compression, int aggregation,
+/// ProgressCallback cb)` — rendezvous handshake, then send [filePath] to the
+/// paired peer. The sender side of a code/QR share: generate a code, show it
+/// as a QR (or let the peer type it), and this call blocks on `from_rendezvous`
+/// until the peer dials in with the same code — then streams the file out.
+#[no_mangle]
+pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxPairSend<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+    code: jni::objects::JString<'local>,
+    server: jni::objects::JString<'local>,
+    port: jint,
+    file_path: jni::objects::JString<'local>,
+    chunk_bytes: jint,
+    compression: jint,
+    _aggregation: jint,
+    cb: JObject<'local>,
+) -> jobject {
+    let code = env
+        .get_string(&code)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let server = env
+        .get_string(&server)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let path = env
+        .get_string(&file_path)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cfg = config_from(chunk_bytes, compression);
+
+    let join =
+        runtime().spawn(async move {
+            let rv = match P2PSession::resolve_peer_addr(
+                &server,
+                if port > 0 {
+                    port as u16
+                } else {
+                    DEFAULT_RENDEZVOUS_PORT
+                },
+            )
+            .await
+            {
+                Ok(addr) => addr,
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            };
+            let mut session =
+                match P2PSession::from_rendezvous(rv, code, identity(), device_id(), cfg, false)
+                    .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = tx.send(Evt::Done(Err(e.to_string())));
+                        return;
+                    }
+                };
+            let res = send_path(&mut session, &path, tx.clone()).await;
+            let _ = tx.send(Evt::Done(res));
+        });
+    track(join.abort_handle());
+
+    let out = drain(env, cb, &rx);
+    forget_active();
+    out
+}
+
 /// `String hyxCancel()` — abort the in-flight transfer.
 #[no_mangle]
 pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxCancel<'local>(
@@ -519,4 +724,54 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxDiscover<'local>(
 ) -> jobject {
     let result = runtime().block_on(discover_peers(if port > 0 { port as u16 } else { 14567 }));
     new_jstring(&mut env, &result)
+}
+
+/// `void hyxSetLogCallback(LogCallback cb)` — register the global Rust→Android
+/// log callback and install the global `tracing` subscriber.
+///
+/// Must be called once from `HyXApp.onCreate` after `ensureLoaded()` (so
+/// `libhyx_mobile.so` is mapped) and before any other JNI call that may emit a
+/// `tracing` event. Subsequent calls are no-ops: `OnceLock::set` ignores
+/// repeated writes, and `set_global_default` returns an error if a global
+/// subscriber is already installed (which we silently drop).
+///
+/// After this returns, every `tracing::event!` on any thread (including Tokio
+/// workers) is forwarded to `cb.onLog(level, tag, message)` via JNI.
+#[no_mangle]
+pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxSetLogCallback<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+    callback: JObject<'local>,
+) {
+    // 1. Obtain the JavaVM — needed to attach arbitrary worker threads later.
+    let vm = match env.get_java_vm() {
+        Ok(vm) => vm,
+        Err(_) => return,
+    };
+
+    // 2. Promote the local callback ref to a global ref so it outlives this
+    //    JNI frame and GC. `GlobalRef` is `Send + Sync`.
+    let global = match env.new_global_ref(callback) {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+
+    // 3. Stash both in process-global `OnceLock`s. Repeated calls (e.g. after
+    //    an Activity recreation) silently keep the first registration.
+    let _ = JVM.set(vm);
+    let _ = LOG_CB.set(global);
+
+    // 4. Install the global tracing subscriber. `set_global_default` errors if
+    //    one already exists — we ignore that, matching the "first call wins"
+    //    semantics of the `OnceLock`s above.
+    use tracing_subscriber::prelude::*;
+    let _ = tracing_subscriber::registry()
+        .with(JniLogLayer)
+        .set_global_default();
+
+    // 5. Bridge the `log` crate onto `tracing` so any `log::info!`/`log::warn!`
+    //    inside hyx-core (or dependencies) is forwarded to `JniLogLayer` too.
+    //    `LogTracer::init` sets `log`'s global logger; failure (already set) is
+    //    ignored for the same reason as above.
+    let _ = tracing_log::LogTracer::init();
 }

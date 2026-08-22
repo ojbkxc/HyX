@@ -8,3 +8,9 @@
 -keepclassmembers class * {
     void onProgress(int,long,long,long);
 }
+
+# Rust calls LogCallback.onLog(int,String,String) via JNI call_method by name;
+# R8 must not rename it or the log callback fails at runtime.
+-keepclassmembers class * {
+    void onLog(int,java.lang.String,java.lang.String);
+}

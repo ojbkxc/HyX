@@ -551,6 +551,7 @@ dependencies = [
  "log",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

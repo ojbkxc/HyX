@@ -64,9 +64,104 @@ class HyXCoreController : ViewModel() {
     @Volatile
     private var cancelled = false
 
+    private val pairAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
     init {
         loadSeedHistory()
         startDiscovery()
+    }
+
+    /** Sender side of the simplest match: generate a fresh code, surface it as
+     *  a QR for the peer to scan, then wait on the rendezvous server for them
+     *  to dial in and receive [filePath]. */
+    fun startPairing(filePath: String) {
+        if (_status.value != TransferStatus.Idle) return
+        val code = generatePairingCode()
+        _pairingCode.value = PairingCode(code, System.currentTimeMillis() + PAIR_CODE_TTL_MS)
+        _status.value = TransferStatus.Pairing
+        if (!HyXNative.isLoaded) {
+            nudgeStatusToTransferring()
+            return
+        }
+        cancelled = false
+        transferStartedMs = System.currentTimeMillis()
+        val cfg = _settings.value
+        _progress.value = TransferProgress(
+            name = filePath.substringAfterLast('/').ifEmpty { "文件" },
+            direction = _direction.value,
+            transferredBytes = 0,
+            totalBytes = 0,
+            speedBps = 0.0,
+            elapsedMs = 0
+        )
+        transferJob = viewModelScope.launch(Dispatchers.IO) {
+            val err = HyXNative.hyxPairSend(
+                code = code,
+                serverAddress = RENDEZVOUS_SERVER,
+                port = RENDEZVOUS_PORT,
+                filePath = filePath,
+                chunkBytes = 1_048_576,
+                compression = if (cfg.compression) 1 else 0,
+                aggregation = if (cfg.aggregation) 1 else 0,
+                onProgress = ::recordProgress
+            )
+            if (cancelled) return@launch
+            if (err.isNullOrEmpty()) markCompleted() else failTransfer(err)
+        }
+    }
+
+    /** Receiver side: dial into the rendezvous room identified by [code] and
+     *  receive into the staging dir. [code] may be a bare code, a `hyx://CODE`
+     *  QR payload, or a `/CODE` path. */
+    fun pairWithCode(code: String) {
+        val clean = linkCode(code)
+        if (clean.isEmpty()) return
+        _pairingCode.value = PairingCode(clean, System.currentTimeMillis() + PAIR_CODE_TTL_MS)
+        _status.value = TransferStatus.Pairing
+        if (HyXNative.isLoaded) {
+            cancelled = false
+            transferStartedMs = System.currentTimeMillis()
+            transferJob = viewModelScope.launch(Dispatchers.IO) {
+                val err = HyXNative.hyxPairRendezvous(
+                    code = clean,
+                    serverAddress = RENDEZVOUS_SERVER,
+                    port = RENDEZVOUS_PORT,
+                    compression = if (_settings.value.compression) 1 else 0,
+                    saveDir = HyXNative.receiveDir,
+                    onProgress = ::recordProgress
+                )
+                if (cancelled) return@launch
+                if (err.isNullOrEmpty()) {
+                    markCompleted()
+                    exportReceivedToDownloads()
+                } else {
+                    failTransfer(err)
+                }
+            }
+        } else {
+            nudgeStatusToTransferring()
+        }
+    }
+
+    /** Parse a QR payload (bare code, `hyx://CODE`, or `/CODE`) into a clean,
+     *  uppercased pairing code. */
+    private fun linkCode(raw: String): String =
+        raw.substringAfterLast('/').trim().uppercase()
+
+    fun scanQr(result: String) = pairWithCode(linkCode(result))
+
+    private fun generatePairingCode(): String = buildString {
+        val rand = java.util.Random()
+        repeat(PAIR_CODE_LEN) {
+            append(pairAlphabet[rand.nextInt(pairAlphabet.length)])
+        }
+    }
+
+    companion object {
+        const val RENDEZVOUS_SERVER = "rendezvous.hyx.dev:14567"
+        const val RENDEZVOUS_PORT = 14567
+        const val PAIR_CODE_LEN = 6
+        const val PAIR_CODE_TTL_MS = 300_000L
     }
 
     fun onDirectionChange(d: TransferDirection) {
@@ -122,77 +217,6 @@ class HyXCoreController : ViewModel() {
         }
     }
 
-    /** Send one file to a discovered peer (sender side of the link). */
-    fun sendFileToPeer(peerAddress: String, filePath: String) {
-        // Only start from Idle: a send during Connecting/Pairing/Transferring
-        // would race the in-flight native call and corrupt its state.
-        if (_status.value != TransferStatus.Idle) return
-        if (!HyXNative.isLoaded) {
-            simulateTransfer()
-            return
-        }
-        cancelled = false
-        val cfg = _settings.value
-        _status.value = TransferStatus.Connecting
-        transferStartedMs = System.currentTimeMillis()
-        _progress.value = TransferProgress(
-            name = filePath.substringAfterLast('/').ifEmpty { "文件" },
-            direction = _direction.value,
-            transferredBytes = 0,
-            totalBytes = 0,
-            speedBps = 0.0,
-            elapsedMs = 0
-        )
-        transferJob = viewModelScope.launch(Dispatchers.IO) {
-            val err = HyXNative.hyxConnect(
-                peerAddress = peerAddress,
-                filePath = filePath,
-                chunkBytes = 1_048_576,
-                fsyncEveryBytes = cfg.fsyncEveryBytes,
-                compression = if (cfg.compression) 1 else 0,
-                aggregation = if (cfg.aggregation) 1 else 0,
-                port = 14567,
-                onProgress = ::recordProgress
-            )
-            if (cancelled) return@launch
-            if (err.isNullOrEmpty()) markCompleted() else failTransfer(err)
-        }
-    }
-
-    fun pairWithCode(code: String) {
-        val server = "rendezvous.hyx.dev:14567"
-        _pairingCode.value = PairingCode(code, System.currentTimeMillis() + 300_000L)
-        _status.value = TransferStatus.Pairing
-        if (HyXNative.isLoaded) {
-            cancelled = false
-            transferStartedMs = System.currentTimeMillis()
-            transferJob = viewModelScope.launch(Dispatchers.IO) {
-                val err = HyXNative.hyxPairRendezvous(
-                    code = code,
-                    serverAddress = server,
-                    port = 14567,
-                    compression = if (_settings.value.compression) 1 else 0,
-                    saveDir = HyXNative.receiveDir,
-                    onProgress = ::recordProgress
-                )
-                if (cancelled) return@launch
-                if (err.isNullOrEmpty()) {
-                    markCompleted()
-                    exportReceivedToDownloads()
-                } else {
-                    failTransfer(err)
-                }
-            }
-        } else {
-            nudgeStatusToTransferring()
-        }
-    }
-
-    fun scanQr(result: String) {
-        val code = result.substringAfterLast('/').ifEmpty { result }
-        pairWithCode(code)
-    }
-
     fun cancelTransfer() {
         cancelled = true
         viewModelScope.launch(Dispatchers.IO) { HyXNative.hyxCancel() }
@@ -200,6 +224,7 @@ class HyXCoreController : ViewModel() {
         recordFinished(TransferStatus.Cancelled)
         transferJob?.cancel()
         _progress.value = null
+        _pairingCode.value = null
         cleanupSendCache()
         // Hold the Cancelled status briefly before returning to Idle, mirroring
         // failTransfer's 1.5 s hold so the user actually sees the cancellation.
@@ -234,15 +259,6 @@ class HyXCoreController : ViewModel() {
             _devicesScanning.value = false
         }
     }
-
-    /** Pick the preferred target (a connected peer first, else any discovered one). */
-    fun targetPeerAddress(): String =
-        _devices.value.firstOrNull { it.connected }?.address
-            ?: _devices.value.firstOrNull()?.address
-            ?: ""
-
-    /** Send [filePath] to the best-known peer (real native transfer). */
-    fun sendPickedFile(filePath: String) = sendFileToPeer(targetPeerAddress(), filePath)
 
     /**
      * Move received files from the private staging dir into the system Downloads
@@ -297,9 +313,7 @@ class HyXCoreController : ViewModel() {
     }.getOrDefault(false)
 
     fun pingPeer(id: String) {
-        // Toggle the "connected" marker used to prefer a peer for sending.
-        // No transfer is started here — the actual send happens via
-        // sendPickedFile from the transfer tab.
+        // Toggle the "connected" marker so the 设备 tab reflects reachability.
         _devices.value = _devices.value.map {
             if (it.id == id) it.copy(connected = !it.connected) else it
         }
@@ -336,12 +350,13 @@ class HyXCoreController : ViewModel() {
 
     /** Terminal success: record history once, clear the progress panel, then
      *  return to Idle so the user can start the next transfer. Without the
-     *  Idle reset the status sticks at Completed and sendFileToPeer (which
-     *  requires Idle) silently refuses every later send. */
+     *  Idle reset the status sticks at Completed, and new transfers (which
+     *  require Idle) would silently refuse to start. */
     private fun markCompleted() {
         _status.value = TransferStatus.Completed
         recordFinished(TransferStatus.Completed)
         _progress.value = null
+        _pairingCode.value = null
         cleanupSendCache()
         viewModelScope.launch {
             delay(1500)
@@ -382,6 +397,7 @@ class HyXCoreController : ViewModel() {
         _status.value = TransferStatus.Failed
         recordFinished(TransferStatus.Failed)
         _progress.value = null
+        _pairingCode.value = null
         cleanupSendCache()
         viewModelScope.launch {
             delay(1500)

@@ -1,5 +1,9 @@
 package com.ojbkxc.hyx.ui.model
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 /** Transfer direction, mirrored from hyx-core. */
 enum class TransferDirection { Send, Receive }
 
@@ -51,3 +55,39 @@ data class EngineSettings(
     val compression: Boolean = true,
     val aggregation: Boolean = true // 引擎B：单流多帧聚合
 )
+
+/** Log severity, ordinal-aligned with Rust tracing_core::Level (0=TRACE … 4=ERROR). */
+enum class LogLevel {
+    Trace, Debug, Info, Warn, Error;
+
+    companion object {
+        /** Map a Rust-side level int to [LogLevel]; out-of-range falls back to [Info]. */
+        fun fromOrdinal(n: Int): LogLevel = entries.getOrElse(n) { Info }
+    }
+}
+
+/** Where a log entry originated: Rust kernel via JNI callback, or Android Kotlin. */
+enum class LogSource { Rust, Android }
+
+/**
+ * A single log record collected by [com.ojbkxc.hyx.core.LogCollector].
+ * @param timestamp wall-clock millis (System.currentTimeMillis)
+ * @param level     severity
+ * @param source    Rust or Android
+ * @param tag       tracing target / Android log tag
+ * @param message   formatted message
+ */
+data class LogEntry(
+    val timestamp: Long,
+    val level: LogLevel,
+    val source: LogSource,
+    val tag: String,
+    val message: String
+) {
+    /** "HH:mm:ss.SSS [LEVEL] [Source] tag: message" — one line, export-friendly. */
+    fun formatted(): String {
+        // SimpleDateFormat is not thread-safe; create per call (logs are bounded at 2000).
+        val time = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(timestamp))
+        return "$time [${level.name.uppercase()}] [${source.name}] $tag: $message"
+    }
+}

@@ -13,6 +13,27 @@
     <string name="pair_code">配对码</string>
     <string name="pair_scan">扫码</string>
     <string name="pair_lan">局域网发现</string>
+    <string name="pair_share">选择文件，生成配对二维码</string>
+    <string name="pair_scan_receive">扫码接收</string>
+    <string name="pair_input_code">输入配对码</string>
+    <string name="pair_qr_title">让对方扫一扫这个二维码</string>
+    <string name="pair_waiting">正在等待对方配对…</string>
+    <string name="pair_code_placeholder">输入对方展示的配对码</string>
+    <string name="pair_scan_prompt">对准对方的配对二维码</string>
+    <string name="pair_confirm">确定</string>
+    <string name="pair_cancel">取消</string>
+
+    <!-- Logs -->
+    <string name="log_title">运行日志</string>
+    <string name="log_copy">复制</string>
+    <string name="log_export">导出</string>
+    <string name="log_clear">清空</string>
+    <string name="log_copied">日志已复制</string>
+    <string name="log_exported">日志已导出</string>
+    <string name="log_export_failed">导出失败</string>
+    <string name="log_cleared">日志已清空</string>
+    <string name="log_empty">暂无日志</string>
+    <string name="log_filter_all">全部</string>
     <string name="send_files_label">选择文件并发给设备</string>
     <string name="start_receive">开始接收</string>
     <string name="cancel">取消</string>
