@@ -237,7 +237,7 @@ class _HomePageState extends State<HomePage> with Refena {
                 unawaited(context.redux(deviceProvider).dispatchAsync(RemoveKnownDeviceAction(d.deviceId)));
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(t.devices.deleted(d.name)),
+                    content: Text(t.devices.deleted(name: d.name)),
                     duration: const Duration(seconds: 2),
                   ),
                 );
@@ -301,7 +301,7 @@ class _HomePageState extends State<HomePage> with Refena {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(t.devices.delete),
-        content: Text(t.devices.deleteConfirm(name)),
+        content: Text(t.devices.deleteConfirm(name: name)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(t.history.cancel)),
           TextButton(
