@@ -72,14 +72,11 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
 
-      - name: 安装 Rust（Android targets）
+      - name: 安装 Rust（Android target）
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: |
             aarch64-linux-android
-            armv7-linux-androideabi
-            i686-linux-android
-            x86_64-linux-android
 
       - name: 检查 rust-toolchain.toml
         working-directory: ${{ env.APK_BUILD_DIR }}/packages/hyx_isolates
@@ -108,18 +105,16 @@ jobs:
         working-directory: ${{ env.APK_BUILD_DIR }}/app
         run: dart run slang
 
-      - name: 构建 APK（split-per-abi）
+      - name: 构建 APK（arm64）
         working-directory: ${{ env.APK_BUILD_DIR }}/app
-        run: flutter build apk --split-per-abi --release
+        run: flutter build apk --target-platform android-arm64 --release
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
           name: apk-result
           path: |
-            ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
             ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-x86_64-release.apk
 
   # ─────────────────────────────────────────────────────────────
   # Linux x86_64 tar.gz（ubuntu-22.04）
@@ -547,95 +542,7 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
-  # Windows arm64 zip（windows-11-arm）
-  # ─────────────────────────────────────────────────────────────
-  build_windows_zip_arm_64:
-    needs: build
-    runs-on: windows-11-arm
 
-    # Windows ARM64 需要 beta：stable (3.41.9) 没有 windows-arm64 产物，会静默回退到 x64 构建
-    # 等 windows-arm64 进入 stable 后切回共享的 stable FLUTTER_VERSION
-    env:
-      FLUTTER_VERSION: "3.47.0-0.4.pre"
-
-    steps:
-      - name: 修复长路径问题
-        run: git config --system core.longpaths true
-
-      - name: 检出仓库
-        uses: actions/checkout@v4
-
-      # Flutter 不提供 Windows ARM64 预编译二进制，从 GitHub 克隆 SDK
-      - name: 安装 Flutter SDK
-        run: |
-          git clone --depth 1 --branch ${{ env.FLUTTER_VERSION }} https://github.com/flutter/flutter.git $env:USERPROFILE\flutter
-          Add-Content $env:GITHUB_PATH "$env:USERPROFILE\flutter\bin"
-          & "$env:USERPROFILE\flutter\bin\flutter.bat" --version
-
-      # Flutter 在缺少 arm64 产物时会静默回退到 x64 Dart SDK，这会产出 x64 构建
-      - name: 验证原生 arm64 工具链
-        run: |
-          $dartVersion = & "$env:USERPROFILE\flutter\bin\dart.bat" --version 2>&1 | Out-String
-          Write-Host $dartVersion
-          if ($dartVersion -notmatch 'windows_arm64') {
-            Write-Error "Dart SDK 不是 windows_arm64 - Flutter 回退到了 x64"
-            exit 1
-          }
-
-      - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: 检查 rust-toolchain.toml
-        working-directory: packages/hyx_isolates
-        run: rustup show
-
-      - name: 生成平台配置
-        working-directory: app
-        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
-
-      - name: 依赖
-        working-directory: app
-        run: flutter pub get
-
-      - name: 安装 flutter_rust_bridge_codegen
-        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
-
-      - name: 生成 FRB 绑定
-        working-directory: packages/hyx_isolates
-        run: flutter_rust_bridge_codegen generate
-
-      - name: 生成 i18n 代码
-        working-directory: app
-        run: dart run slang
-
-      - name: 编译 Windows
-        working-directory: app
-        run: flutter build windows --release
-
-      - name: 创建空 settings.json
-        working-directory: app
-        run: echo {} > build/windows/arm64/runner/Release/settings.json
-
-      - name: 添加 DLL 文件
-        working-directory: app
-        run: |
-          $crt = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\arm64\Microsoft.VC143.CRT' | Select-Object -Last 1
-          Copy-Item "$($crt.FullName)\msvcp140.dll" build/windows/arm64/runner/Release/
-          Copy-Item "$($crt.FullName)\vcruntime140.dll" build/windows/arm64/runner/Release/
-          Copy-Item "$($crt.FullName)\vcruntime140_1.dll" build/windows/arm64/runner/Release/
-
-      - name: 打包 zip
-        working-directory: app
-        run: Compress-Archive -Path build/windows/arm64/runner/Release/* -DestinationPath "HyX-${{ needs.build.outputs.version }}-windows-arm-64.zip"
-
-      - name: 上传 zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-zip-arm-64-result
-          path: app/HyX-${{ needs.build.outputs.version }}-windows-arm-64.zip
-          if-no-files-found: error
-
-  # ─────────────────────────────────────────────────────────────
   # Windows x86_64 exe 安装包（Inno Setup，windows-latest）
   # ─────────────────────────────────────────────────────────────
   build_windows_exe_x86_64:
@@ -868,15 +775,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   build_cli_windows_exe:
     needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-latest
-            suffix: x86-64
-          - runner: windows-11-arm
-            suffix: arm-64
-    runs-on: ${{ matrix.runner }}
+    runs-on: windows-latest
 
     steps:
       - name: 检出仓库
@@ -889,13 +788,13 @@ jobs:
         run: cargo build --release --package hyx
 
       - name: 重命名 CLI 可执行文件
-        run: Rename-Item -Path "target\release\hyx.exe" -NewName "HyX-CLI-${{ needs.build.outputs.version }}-windows-${{ matrix.suffix }}.exe"
+        run: Rename-Item -Path "target\release\hyx.exe" -NewName "HyX-CLI-${{ needs.build.outputs.version }}-windows-x86-64.exe"
 
       - name: 上传 CLI
         uses: actions/upload-artifact@v4
         with:
-          name: windows-cli-exe-${{ matrix.suffix }}-result
-          path: target\release\HyX-CLI-${{ needs.build.outputs.version }}-windows-${{ matrix.suffix }}.exe
+          name: windows-cli-exe-x86-64-result
+          path: target\release\HyX-CLI-${{ needs.build.outputs.version }}-windows-x86-64.exe
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
@@ -911,7 +810,6 @@ jobs:
       - build_deb_arm_64
       - build_appimage_x86_64
       - build_windows_zip_x86_64
-      - build_windows_zip_arm_64
       - build_windows_exe_x86_64
       - build_macos
       - build_ios_no_sign
@@ -933,10 +831,8 @@ jobs:
         run: |
           VERSION=${{ needs.build.outputs.version }}
           mkdir -p release-assets
-          # APK（split-per-abi）
-          cp all-artifacts/apk-result/app-armeabi-v7a-release.apk "release-assets/HyX-$VERSION-android-arm32v7.apk" 2>/dev/null || true
+          # APK（arm64）
           cp all-artifacts/apk-result/app-arm64-v8a-release.apk    "release-assets/HyX-$VERSION-android-arm64v8.apk" 2>/dev/null || true
-          cp all-artifacts/apk-result/app-x86_64-release.apk       "release-assets/HyX-$VERSION-android-x64.apk"      2>/dev/null || true
           # Linux tar.gz
           cp all-artifacts/tar-gz-x86-64-result/*.tar.gz "release-assets/HyX-$VERSION-linux-x86-64.tar.gz" 2>/dev/null || true
           cp all-artifacts/tar-gz-arm-64-result/*.tar.gz "release-assets/HyX-$VERSION-linux-arm-64.tar.gz" 2>/dev/null || true
@@ -951,7 +847,6 @@ jobs:
           done
           # Windows zip（便携版）
           cp all-artifacts/windows-zip-x86-64-result/*.zip "release-assets/HyX-$VERSION-windows-x86-64.zip" 2>/dev/null || true
-          cp all-artifacts/windows-zip-arm-64-result/*.zip "release-assets/HyX-$VERSION-windows-arm-64.zip" 2>/dev/null || true
           # Windows exe 安装包
           cp all-artifacts/windows-exe-x86-64-result/*.exe "release-assets/HyX-$VERSION-windows-x86-64.exe" 2>/dev/null || true
           # macOS zip
@@ -961,7 +856,6 @@ jobs:
           cp all-artifacts/cli-linux-arm-64-result/*.tar.gz "release-assets/HyX-CLI-$VERSION-linux-arm-64.tar.gz" 2>/dev/null || true
           # CLI - Windows exe
           cp all-artifacts/windows-cli-exe-x86-64-result/*.exe "release-assets/HyX-CLI-$VERSION-windows-x86-64.exe" 2>/dev/null || true
-          cp all-artifacts/windows-cli-exe-arm-64-result/*.exe "release-assets/HyX-CLI-$VERSION-windows-arm-64.exe" 2>/dev/null || true
           # 列出最终发布文件
           ls -l release-assets/
 
@@ -987,9 +881,7 @@ jobs:
             ### 下载
             | 平台 | 文件 |
             |------|------|
-            | Android (arm32) | `HyX-${{ needs.build.outputs.version }}-android-arm32v7.apk` |
             | Android (arm64) | `HyX-${{ needs.build.outputs.version }}-android-arm64v8.apk` |
-            | Android (x64)   | `HyX-${{ needs.build.outputs.version }}-android-x64.apk` |
             | Linux x86_64    | `HyX-${{ needs.build.outputs.version }}-linux-x86-64.tar.gz` |
             | Linux arm64     | `HyX-${{ needs.build.outputs.version }}-linux-arm-64.tar.gz` |
             | Linux deb x86_64| `HyX-${{ needs.build.outputs.version }}-linux-x86-64.deb` |
@@ -997,12 +889,10 @@ jobs:
             | Linux AppImage  | `HyX-${{ needs.build.outputs.version }}-linux-x86-64.AppImage` |
             | Windows x86_64 安装包 | `HyX-${{ needs.build.outputs.version }}-windows-x86-64.exe` |
             | Windows x86_64 便携版 | `HyX-${{ needs.build.outputs.version }}-windows-x86-64.zip` |
-            | Windows arm64 便携版 | `HyX-${{ needs.build.outputs.version }}-windows-arm-64.zip` |
             | macOS           | `HyX-${{ needs.build.outputs.version }}-macos.zip` |
             | CLI Linux x86_64 | `HyX-CLI-${{ needs.build.outputs.version }}-linux-x86-64.tar.gz` |
             | CLI Linux arm64  | `HyX-CLI-${{ needs.build.outputs.version }}-linux-arm-64.tar.gz` |
             | CLI Windows x86_64 | `HyX-CLI-${{ needs.build.outputs.version }}-windows-x86-64.exe` |
-            | CLI Windows arm64 | `HyX-CLI-${{ needs.build.outputs.version }}-windows-arm-64.exe` |
 
             ### 特性
             - Rust 内核：QUIC 单连续流 + 断点续传 + 增量 SHA-256
@@ -1020,9 +910,7 @@ jobs:
             "version": "${VERSION}",
             "body": "HyX v${VERSION}",
             "files": {
-              "android-arm32v7": "HyX-${VERSION}-android-arm32v7.apk",
               "android-arm64v8": "HyX-${VERSION}-android-arm64v8.apk",
-              "android-x64": "HyX-${VERSION}-android-x64.apk",
               "linux-x86-64-tar": "HyX-${VERSION}-linux-x86-64.tar.gz",
               "linux-arm-64-tar": "HyX-${VERSION}-linux-arm-64.tar.gz",
               "linux-x86-64-deb": "HyX-${VERSION}-linux-x86-64.deb",
@@ -1030,7 +918,6 @@ jobs:
               "linux-x86-64-appimage": "HyX-${VERSION}-linux-x86-64.AppImage",
               "windows-x86-64-exe": "HyX-${VERSION}-windows-x86-64.exe",
               "windows-x86-64-zip": "HyX-${VERSION}-windows-x86-64.zip",
-              "windows-arm-64-zip": "HyX-${VERSION}-windows-arm-64.zip",
               "macos": "HyX-${VERSION}-macos.zip"
             }
           }
