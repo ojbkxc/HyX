@@ -7,12 +7,13 @@ use anyhow::Result;
 use tokio::signal;
 use tracing::{debug, info, warn};
 
+#[cfg(test)]
+use hyx_core::Uuid;
 use hyx_core::{
     identity::{device_id_from_fingerprint, Identity},
     progress::ProgressState,
     reconnect::ReconnectConfig,
     transfer_folder::FolderTransferState,
-    Uuid,
 };
 
 use crate::cli::SessionParams;
@@ -60,7 +61,7 @@ pub async fn handle_resume(
     let mut session = establish_session(
         &session_params,
         "client",
-        identity,
+        identity.clone(),
         device_id_from_fingerprint(&identity.fingerprint()),
         Some(state.config.clone()),
     )

@@ -9,7 +9,6 @@ use tracing::info;
 use hyx_core::{
     discovery::DiscoveryManager,
     identity::{device_id_from_fingerprint, Identity},
-    Uuid,
 };
 
 pub async fn handle_discover(
