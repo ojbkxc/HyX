@@ -40,9 +40,9 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _bootstrap() async {
     await RustLib.init();
-    await initApp();
-    final id = await selfDeviceId();
-    final fp = await createDevice();
+    // createDevice / selfDeviceId are #[frb(sync)]: synchronous Dart.
+    final id = selfDeviceId();
+    final fp = createDevice();
     setState(() {
       _deviceId = id;
       _fingerprint = fp;

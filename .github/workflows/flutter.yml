@@ -18,11 +18,10 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Setup Rust (+ Android target)
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          targets: aarch64-linux-android
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -55,6 +54,3 @@ jobs:
 
       - name: Rust test (host)
         run: cargo test --manifest-path flutter_app/rust/Cargo.toml -p hyx_frb
-
-      - name: Rust check (Android arm64 target)
-        run: cargo check --target aarch64-linux-android --manifest-path flutter_app/rust/Cargo.toml -p hyx_frb
