@@ -299,7 +299,7 @@ jobs:
         working-directory: app
         run: |
           mkdir -p linux/packaging/deb
-          cp ../../support/build/deb/make_config.yaml linux/packaging/deb/make_config.yaml
+          cp ../support/build/deb/make_config.yaml linux/packaging/deb/make_config.yaml
 
       - name: 构建 deb 包
         working-directory: app
@@ -376,7 +376,7 @@ jobs:
         working-directory: app
         run: |
           mkdir -p linux/packaging/deb
-          cp ../../support/build/deb/make_config.yaml linux/packaging/deb/make_config.yaml
+          cp ../support/build/deb/make_config.yaml linux/packaging/deb/make_config.yaml
 
       - name: 构建 deb 包
         working-directory: app
