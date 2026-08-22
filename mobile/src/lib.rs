@@ -765,6 +765,7 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxSetLogCallback<'loc
     // 4. Install the global tracing subscriber. `set_global_default` errors if
     //    one already exists — we ignore that, matching the "first call wins"
     //    semantics of the `OnceLock`s above.
+    use tracing_subscriber::prelude::*; // brings `Registry::with` into scope
     let subscriber = tracing_subscriber::registry().with(JniLogLayer);
     let _ = tracing::subscriber::set_global_default(subscriber);
 
