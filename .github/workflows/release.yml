@@ -907,3 +907,58 @@ jobs:
           files: release-assets/*
           draft: false
           prerelease: false
+
+      - name: Generate latest.json
+        run: |
+          VERSION=${{ needs.build.outputs.version }}
+          cat > release-assets/latest.json <<JSONEOF
+          {
+            "version": "${VERSION}",
+            "body": "HyX v${VERSION}",
+            "files": {
+              "android-arm32v7": "HyX-${VERSION}-android-arm32v7.apk",
+              "android-arm64v8": "HyX-${VERSION}-android-arm64v8.apk",
+              "android-x64": "HyX-${VERSION}-android-x64.apk",
+              "linux-x86-64-tar": "HyX-${VERSION}-linux-x86-64.tar.gz",
+              "linux-arm-64-tar": "HyX-${VERSION}-linux-arm-64.tar.gz",
+              "linux-x86-64-deb": "HyX-${VERSION}-linux-x86-64.deb",
+              "linux-arm-64-deb": "HyX-${VERSION}-linux-arm-64.deb",
+              "linux-x86-64-appimage": "HyX-${VERSION}-linux-x86-64.AppImage",
+              "windows-x86-64-exe": "HyX-${VERSION}-windows-x86-64.exe",
+              "windows-x86-64-zip": "HyX-${VERSION}-windows-x86-64.zip",
+              "windows-arm-64-zip": "HyX-${VERSION}-windows-arm-64.zip",
+              "macos": "HyX-${VERSION}-macos.zip"
+            }
+          }
+          JSONEOF
+          cat release-assets/latest.json
+
+      - name: Upload to Cloudflare R2
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # 上传所有 release-assets 到 R2 HyX/ 目录
+          for file in release-assets/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              encoded_key=$(echo "HyX/${filename}" | sed 's/\//%2F/g')
+              content_type="application/octet-stream"
+              case "$filename" in
+                *.apk) content_type="application/vnd.android.package-archive" ;;
+                *.json) content_type="application/json" ;;
+                *.zip) content_type="application/zip" ;;
+                *.tar.gz) content_type="application/gzip" ;;
+                *.deb) content_type="application/vnd.debian.binary-package" ;;
+                *.AppImage) content_type="application/x-executable" ;;
+                *.exe) content_type="application/x-msdownload" ;;
+              esac
+              echo "Uploading $filename..."
+              curl -s -X PUT \
+                "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/downloads/objects/${encoded_key}" \
+                -H "Authorization: Bearer ${CF_API_TOKEN}" \
+                -H "Content-Type: ${content_type}" \
+                --data-binary @"$file"
+            fi
+          done
+          echo "Uploaded all assets to Cloudflare R2 HyX/"
