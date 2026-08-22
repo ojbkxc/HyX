@@ -58,12 +58,31 @@ const MAX_CHUNK_SIZE: usize = 16 * 1024 * 1024;
 /// 1 TiB is large enough for any plausible single-file transfer.
 pub const MAX_TRANSFER_FILE_SIZE: u64 = 1024 * 1024 * 1024 * 1024;
 
+/// Upper bound on the number of chunks a single file may be split into.
+/// `HashSet::with_capacity(total_chunks)` is allocated up front on the
+/// receive path, so a hostile peer that advertises `chunk_size = 1` with a
+/// 1 TiB file would otherwise drive a ~2^40-element allocation (OOM abort).
+/// 16 Mi chunks is far beyond any realistic transfer (at the 64 KiB minimum
+/// chunk size that already covers 1 TiB).
+pub const MAX_CHUNKS_PER_FILE: u64 = 1 << 24;
+
 /// Reject a peer-supplied per-file size that exceeds the sanity bound.
 /// Called from the folder-receive path before any stream is accepted.
 pub fn validate_file_size(size: u64) -> Result<()> {
     if size > MAX_TRANSFER_FILE_SIZE {
         return Err(Error::Protocol(format!(
             "peer-supplied file size {size} exceeds maximum {MAX_TRANSFER_FILE_SIZE}"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a peer-supplied chunk count that would exhaust receiver memory.
+/// Guards the up-front `HashSet::with_capacity` on the receive path.
+pub fn validate_chunk_count(total_chunks: u64) -> Result<()> {
+    if total_chunks > MAX_CHUNKS_PER_FILE {
+        return Err(Error::Protocol(format!(
+            "peer-supplied chunk count {total_chunks} exceeds maximum {MAX_CHUNKS_PER_FILE}"
         )));
     }
     Ok(())
@@ -296,6 +315,7 @@ impl<'a> FileTransferSession<'a> {
                 self.config.chunk_size
             )));
         }
+        validate_chunk_count(total_chunks)?;
 
         let writer =
             ChunkWriter::new(output_path, self.config.chunk_size as usize, file_size).await?;

@@ -64,7 +64,9 @@ use crate::protocol::{
     CompleteMessage, ConfigMessage, FileChecksumMessage, FileMetadata, Message, ResumePoint,
     TransferInfo,
 };
-use crate::transfer_file::{chunk_count, validate_file_size, FileTransferSession};
+use crate::transfer_file::{
+    chunk_count, validate_chunk_count, validate_file_size, FileTransferSession,
+};
 
 /// Statistics emitted at end of a folder transfer.
 #[derive(Debug, Clone)]
@@ -284,6 +286,12 @@ impl<'a> FolderTransferSession<'a> {
         let total_bytes = state.total_bytes;
         if let Some(ref mut p) = progress {
             p.set_total_bytes(total_bytes);
+            // On a resume, bytes transferred in prior sessions are already on
+            // disk; seed the progress bar so the sender's display matches the
+            // receiver's (which adds `already_transferred` itself).
+            if state.transferred_bytes > 0 {
+                p.add_bytes(state.transferred_bytes);
+            }
         }
 
         let is_resuming = resume_point.is_some();
@@ -326,6 +334,35 @@ impl<'a> FolderTransferSession<'a> {
         } else {
             path.parent().unwrap_or(path)
         };
+
+        // On a resume, the state file's relative paths were captured from the
+        // ORIGINAL session. If the user points us at a different directory,
+        // `base_path.join(relative)` could silently read a different file of
+        // the same name. Verify every pending file exists under the current
+        // base with the recorded size before sending anything.
+        if is_resuming {
+            for file_meta in &state.files {
+                let relative_path = PathBuf::from(&file_meta.path);
+                let full_path = base_path.join(&relative_path);
+                match fs::metadata(&full_path).await {
+                    Ok(m) if m.len() == file_meta.size => {}
+                    Ok(m) => {
+                        return Err(Error::Protocol(format!(
+                        "resume path mismatch: {} is {} bytes, state expects {} (wrong directory?)",
+                        full_path.display(),
+                        m.len(),
+                        file_meta.size
+                    )))
+                    }
+                    Err(_) => {
+                        return Err(Error::Protocol(format!(
+                            "resume path mismatch: {} does not exist (wrong directory?)",
+                            full_path.display()
+                        )))
+                    }
+                }
+            }
+        }
 
         for file_index in 0..state.files.len() {
             if state.completed_files.contains(&file_index) {
@@ -431,7 +468,12 @@ impl<'a> FolderTransferSession<'a> {
             if file_index < transfer_info.items.len() {
                 let current_size = transfer_info.items[file_index].size;
                 let total_chunks = chunk_count(current_size, self.config.chunk_size);
-                let completed_chunks = resume_point.completed_chunks.len() as u64;
+                // Dedup + drop out-of-range indices, mirroring the
+                // `already_sent` computation below, so the progress seed
+                // matches what the receiver will actually skip.
+                let unique: std::collections::HashSet<u64> =
+                    resume_point.completed_chunks.iter().copied().collect();
+                let completed_chunks = unique.iter().filter(|&&i| i < total_chunks).count() as u64;
                 let added = if completed_chunks < total_chunks {
                     completed_chunks * self.config.chunk_size as u64
                 } else {
@@ -502,6 +544,7 @@ impl<'a> FolderTransferSession<'a> {
             }
 
             let total_chunks = chunk_count(file_meta.size, self.config.chunk_size);
+            validate_chunk_count(total_chunks)?;
             // Deduplicate the resume bitmap: a state file may hold duplicate
             // chunk indices, and counting them inflates `already_sent`, which
             // would make the receiver exit before the sender finished.
@@ -512,7 +555,11 @@ impl<'a> FolderTransferSession<'a> {
                 .map(|rp| {
                     let unique: std::collections::HashSet<u64> =
                         rp.completed_chunks.iter().copied().collect();
-                    unique.len() as u64
+                    // Drop out-of-range indices: a stale/corrupt state file may
+                    // reference chunks beyond the current file's size, and
+                    // counting them would make the receiver exit early while
+                    // the sender still has real chunks in flight (desync).
+                    unique.iter().filter(|&&i| i < total_chunks).count() as u64
                 })
                 .unwrap_or(0);
             let streams_to_receive = total_chunks.saturating_sub(already_sent);
@@ -785,6 +832,17 @@ impl FolderTransferState {
                 self.transferred_bytes += self.files[file_index].size;
             }
         }
+    }
+
+    /// Drop all chunk-level bitmaps before persisting state on an error.
+    /// Chunks flushed to the wire may not have reached the receiver's disk
+    /// yet (the receiver buffers up to 64 MiB before writing), so trusting
+    /// them on resume would make the receiver skip chunks it never wrote and
+    /// fail the SHA-256 check forever. The interrupted file restarts from
+    /// chunk 0 on the next attempt; fully completed files are still tracked
+    /// by `completed_files` and stay skipped.
+    pub fn clear_chunk_bitmaps(&mut self) {
+        self.file_chunks.clear();
     }
 
     pub fn next_file(&self) -> Option<usize> {
