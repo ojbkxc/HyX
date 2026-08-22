@@ -15,7 +15,9 @@ crate-type = ["cdylib"]
 hyx-core = { path = "../core" }
 tokio = { version = "1.40", features = ["rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "tracing-log"] }
+tracing-core = "0.1"
+tracing-log = "0.2"
+tracing-subscriber = { version = "0.3", features = ["registry"] }
 log = "0.4"
 # default-features off removes the JVM "invocation" feature, which is only
 # needed at runtime and keeps the CI host build from pulling jvm symbols.
