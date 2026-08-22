@@ -9,8 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.journeyapps.barcode.ScanContract
-import com.journeyapps.barcode.ScanOptions
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import com.ojbkxc.hyx.core.HyXCoreController
 import com.ojbkxc.hyx.ui.HyXNavigation
 import com.ojbkxc.hyx.ui.theme.HyXTheme

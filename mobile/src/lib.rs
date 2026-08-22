@@ -740,7 +740,7 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxDiscover<'local>(
 /// workers) is forwarded to `cb.onLog(level, tag, message)` via JNI.
 #[no_mangle]
 pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxSetLogCallback<'local>(
-    mut env: JNIEnv<'local>,
+    env: JNIEnv<'local>,
     _this: JObject<'local>,
     callback: JObject<'local>,
 ) {

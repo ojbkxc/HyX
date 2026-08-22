@@ -81,7 +81,7 @@ fun LogSheet(
     onClear: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartialExpansion = true)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
 
     // Active level filter: null = all, otherwise show only that level and above.
