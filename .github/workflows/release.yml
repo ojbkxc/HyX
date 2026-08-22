@@ -142,18 +142,19 @@ jobs:
       - name: 安装 cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      - name: 配置 Android NDK
-        uses: nttod/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: v27
+      - name: 配置 Android NDK（使用 runner 预装）
+        run: |
+          NDK_PATH=$(ls -d /usr/local/lib/android/sdk/ndk/*/ | head -1)
+          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
+          echo "NDK_PATH=${NDK_PATH}"
+          ls "${NDK_PATH}"
 
-      - name: 设置 NDK 路径
-        run: echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+      - name: 安装 Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: 构建 APK 轻量版
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
+        run: gradle assembleRelease --no-daemon
 
       - name: 上传 APK 轻量版
         uses: actions/upload-artifact@v4
