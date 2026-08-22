@@ -20,12 +20,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use flutter_rust_bridge::frb;
+use hyx_core::DEFAULT_RENDEZVOUS_PORT;
 use hyx_core::progress::{ProgressCallback, ProgressState};
 use hyx_core::protocol::ConfigMessage;
 use hyx_core::reconnect::ReconnectConfig;
 use hyx_core::session::P2PSession;
 use hyx_core::transfer_folder::AcceptDecision;
-use hyx_core::DEFAULT_RENDEZVOUS_PORT;
 use tokio::runtime::{Builder, Runtime};
 use tokio::task::AbortHandle;
 

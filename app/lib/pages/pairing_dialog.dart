@@ -131,7 +131,7 @@ class _PairingDialogState extends State<PairingDialog> with Refena {
   }
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles();
+    final result = await FilePicker.pickFiles();
     if (result != null && result.files.isNotEmpty) {
       setState(() => _filePath = result.files.first.path);
     }

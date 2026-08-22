@@ -13,8 +13,8 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 use flutter_rust_bridge::frb;
-use hyx_core::identity::{device_id_from_fingerprint, Identity};
 use hyx_core::Uuid;
+use hyx_core::identity::{Identity, device_id_from_fingerprint};
 
 use crate::api::model::{RsDevice, RsDeviceVia};
 

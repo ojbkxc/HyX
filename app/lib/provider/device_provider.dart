@@ -110,7 +110,7 @@ class RefreshPeersAction extends AsyncReduxAction<DeviceService, DeviceState> {
   @override
   Future<DeviceState> reduce() async {
     try {
-      final peers = await rust_discovery.discover(port);
+      final peers = await rust_discovery.discover(port: port);
       // 按 deviceId 去重，保留最后发现的地址。
       final map = <String, model.RsDiscoveredPeer>{};
       for (final p in peers) {

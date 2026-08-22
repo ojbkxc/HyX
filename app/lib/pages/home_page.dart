@@ -181,7 +181,7 @@ class _HomePageState extends State<HomePage> with Refena {
 
   /// 点击设备 → 选择文件 → 发送。
   Future<void> _sendToPeer(BuildContext context, model.RsDiscoveredPeer peer) async {
-    final result = await FilePicker().pickFiles(allowMultiple: false);
+    final result = await FilePicker.pickFiles(allowMultiple: false);
     if (result == null || result.files.isEmpty) return;
     final path = result.files.first.path;
     if (path == null) return;
