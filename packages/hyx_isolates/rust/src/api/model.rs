@@ -72,6 +72,7 @@ pub struct RsProgressEvent {
     pub speed: f64,
     /// 当前状态（用于状态机推进；mobile 版本通过 Done 事件隐式表达）。
     pub status: RsTransferStatus,
+
     /// 失败/完成时的可选消息（对应 mobile `Evt::Done` 的 `Result<String, String>`）。
     pub message: Option<String>,
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:hyx_app/util/transfer_direction.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:logging/logging.dart';
 import 'package:refena_flutter/refena_flutter.dart';
@@ -17,7 +18,7 @@ const _kMaxRecords = 50;
 /// 对端地址、耗时与时间戳。持久化到 SharedPreferences（JSON 编码）。
 class HistoryRecord {
   final String id;
-  final model.RsTransferDirection direction;
+  final RsTransferDirection direction;
   final String fileName;
   final model.RsTransferStatus status;
   final int bytesTransferred;
@@ -49,7 +50,7 @@ class HistoryRecord {
 
   static HistoryRecord fromJson(Map<String, dynamic> json) => HistoryRecord(
         id: json['id'] as String,
-        direction: model.RsTransferDirection.values.byName(json['direction'] as String),
+        direction: RsTransferDirection.values.byName(json['direction'] as String),
         fileName: json['fileName'] as String,
         status: model.RsTransferStatus.values.byName(json['status'] as String),
         bytesTransferred: (json['bytes'] as num).toInt(),

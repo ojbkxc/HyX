@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:hyx_app/gen/strings.g.dart';
 import 'package:hyx_app/provider/history_provider.dart';
 import 'package:hyx_app/util/formatters.dart';
+import 'package:hyx_app/util/transfer_direction.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:refena_flutter/refena_flutter.dart';
 
@@ -107,7 +108,7 @@ class _HistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isSend = record.direction == model.RsTransferDirection.send;
+    final isSend = record.direction == RsTransferDirection.send;
     final statusColor = switch (record.status) {
       model.RsTransferStatus.completed => Colors.green,
       model.RsTransferStatus.failed => scheme.error,

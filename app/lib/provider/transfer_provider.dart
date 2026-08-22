@@ -1,6 +1,6 @@
 import 'dart:async';
 
-
+import 'package:hyx_app/util/transfer_direction.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:hyx_isolates/rust/api/transfer.dart' as rust_transfer;
 import 'package:logging/logging.dart';
@@ -15,7 +15,7 @@ final _logger = Logger('TransferProvider');
 /// 可被 UI 直接观察的状态。`startTime` 用于计算耗时；`fileName` / `peerAddress`
 /// 供历史记录使用。
 class TransferState {
-  final model.RsTransferDirection direction;
+  final RsTransferDirection direction;
   final model.RsTransferStatus status;
   final int transferred;
   final int total;
@@ -27,7 +27,7 @@ class TransferState {
   final String? errorMessage;
 
   const TransferState({
-    this.direction = model.RsTransferDirection.send,
+    this.direction = RsTransferDirection.send,
     this.status = model.RsTransferStatus.idle,
     this.transferred = 0,
     this.total = 0,
@@ -55,7 +55,7 @@ class TransferState {
       status == model.RsTransferStatus.cancelled;
 
   TransferState copyWith({
-    model.RsTransferDirection? direction,
+    RsTransferDirection? direction,
     model.RsTransferStatus? status,
     int? transferred,
     int? total,
@@ -135,7 +135,7 @@ class StartReceiveAction extends AsyncReduxAction<TransferService, TransferState
       );
     }
     return state.copyWith(
-      direction: model.RsTransferDirection.receive,
+      direction: RsTransferDirection.receive,
       status: model.RsTransferStatus.connecting,
       startTime: DateTime.now(),
       clearError: true,
@@ -180,7 +180,7 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
       );
     }
     return state.copyWith(
-      direction: model.RsTransferDirection.send,
+      direction: RsTransferDirection.send,
       status: model.RsTransferStatus.connecting,
       fileName: name,
       peerAddress: peerAddress,
@@ -226,7 +226,7 @@ class StartPairReceiveAction extends AsyncReduxAction<TransferService, TransferS
       );
     }
     return state.copyWith(
-      direction: model.RsTransferDirection.receive,
+      direction: RsTransferDirection.receive,
       status: model.RsTransferStatus.pairing,
       peerAddress: server,
       startTime: DateTime.now(),
@@ -272,7 +272,7 @@ class StartPairSendAction extends AsyncReduxAction<TransferService, TransferStat
       );
     }
     return state.copyWith(
-      direction: model.RsTransferDirection.send,
+      direction: RsTransferDirection.send,
       status: model.RsTransferStatus.pairing,
       fileName: name,
       peerAddress: server,
