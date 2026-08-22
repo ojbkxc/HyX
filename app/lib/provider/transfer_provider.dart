@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter_rust_bridge/flutter_rust_bridge.dart' show RustStreamSink;
+
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:hyx_isolates/rust/api/transfer.dart' as rust_transfer;
 import 'package:logging/logging.dart';
@@ -121,12 +121,10 @@ class StartReceiveAction extends AsyncReduxAction<TransferService, TransferState
     notifier._sub?.cancel();
 
     final dir = saveDir ?? (await _defaultSaveDir());
-    final sink = RustStreamSink<model.RsProgressEvent>();
-    final sub = sink.stream.listen((e) => dispatch(_UpdateProgressAction(e)));
-    notifier._sub = sub;
 
     try {
-      rust_transfer.startListener(port: port, chunkBytes: chunkBytes, compression: compression, saveDir: dir, sink: sink);
+      final stream = rust_transfer.startListener(port: port, chunkBytes: chunkBytes, compression: compression, saveDir: dir);
+      notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
       notifier._sub?.cancel();
       notifier._sub = null;
@@ -168,13 +166,10 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
     if (state.busy) return state;
     notifier._sub?.cancel();
 
-    final sink = RustStreamSink<model.RsProgressEvent>();
-    final sub = sink.stream.listen((e) => dispatch(_UpdateProgressAction(e)));
-    notifier._sub = sub;
-
     final name = filePath.split(RegExp(r'[/\\]')).last;
     try {
-      rust_transfer.connect(peerAddress: peerAddress, filePath: filePath, chunkBytes: chunkBytes, compression: compression, port: port, sink: sink);
+      final stream = rust_transfer.connect(peerAddress: peerAddress, filePath: filePath, chunkBytes: chunkBytes, compression: compression, port: port);
+      notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
       notifier._sub?.cancel();
       notifier._sub = null;
@@ -217,12 +212,10 @@ class StartPairReceiveAction extends AsyncReduxAction<TransferService, TransferS
     notifier._sub?.cancel();
 
     final dir = saveDir ?? (await _defaultSaveDir());
-    final sink = RustStreamSink<model.RsProgressEvent>();
-    final sub = sink.stream.listen((e) => dispatch(_UpdateProgressAction(e)));
-    notifier._sub = sub;
 
     try {
-      rust_transfer.pairRendezvous(code: code, server: server, port: port, compression: compression, saveDir: dir, sink: sink);
+      final stream = rust_transfer.pairRendezvous(code: code, server: server, port: port, compression: compression, saveDir: dir);
+      notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
       notifier._sub?.cancel();
       notifier._sub = null;
@@ -265,13 +258,10 @@ class StartPairSendAction extends AsyncReduxAction<TransferService, TransferStat
     if (state.busy) return state;
     notifier._sub?.cancel();
 
-    final sink = RustStreamSink<model.RsProgressEvent>();
-    final sub = sink.stream.listen((e) => dispatch(_UpdateProgressAction(e)));
-    notifier._sub = sub;
-
     final name = filePath.split(RegExp(r'[/\\]')).last;
     try {
-      rust_transfer.pairSend(code: code, server: server, port: port, filePath: filePath, chunkBytes: chunkBytes, compression: compression, sink: sink);
+      final stream = rust_transfer.pairSend(code: code, server: server, port: port, filePath: filePath, chunkBytes: chunkBytes, compression: compression);
+      notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
       notifier._sub?.cancel();
       notifier._sub = null;

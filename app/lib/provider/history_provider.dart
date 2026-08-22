@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:hyx_isolates/rust/api/model.dart' as model;
@@ -75,7 +76,7 @@ class HistoryService extends ReduxNotifier<HistoryState> {
   @override
   HistoryState init() {
     // 异步加载已有记录（init 返回后执行）。
-    unawaited(dispatchAsync(const _LoadHistoryAction()));
+    unawaited(dispatchAsync(_LoadHistoryAction()));
     return const HistoryState();
   }
 
@@ -92,7 +93,7 @@ class HistoryService extends ReduxNotifier<HistoryState> {
 
 /// 内部：从 SharedPreferences 异步加载历史记录。
 class _LoadHistoryAction extends AsyncReduxAction<HistoryService, HistoryState> {
-  const _LoadHistoryAction();
+  _LoadHistoryAction();
 
   @override
   Future<HistoryState> reduce() async {

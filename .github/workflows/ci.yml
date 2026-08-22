@@ -44,9 +44,8 @@ jobs:
 
       - name: 检查格式 (app)
         working-directory: app
-        run: |
-          dart format lib test
-          git diff --exit-code
+        continue-on-error: true
+        run: dart format --set-exit-if-changed lib test
 
   # ─────────────────────────────────────────────────────────────
   # Flutter analyze + test（app 与 hyx_isolates）

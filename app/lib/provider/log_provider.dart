@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter_rust_bridge/flutter_rust_bridge.dart' show RustStreamSink;
+
 import 'package:hyx_isolates/rust/api/logging.dart' as rust_logging;
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:logging/logging.dart';
@@ -78,12 +78,11 @@ class InstallLogCallbackAction extends AsyncReduxAction<LogService, LogState> {
   @override
   Future<LogState> reduce() async {
     if (notifier._sub != null) return state;
-    final sink = RustStreamSink<model.RsLogEvent>();
-    notifier._sub = sink.stream.listen((e) {
-      dispatch(_AddLogAction(LogEntry.fromEvent(e)));
-    });
     try {
-      await rust_logging.setLogCallback(sink);
+      final stream = rust_logging.setLogCallback();
+      notifier._sub = stream.listen((e) {
+        dispatch(_AddLogAction(LogEntry.fromEvent(e)));
+      });
     } catch (e) {
       _logger.warning('setLogCallback failed: $e');
     }

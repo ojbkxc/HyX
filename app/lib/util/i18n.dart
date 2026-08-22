@@ -14,11 +14,7 @@ Future<void> initI18n() async {
   try {
     // 取系统 locale 的语言代码，匹配 slang 编译期已知的 locale。
     final systemLang = ui.PlatformDispatcher.instance.locale.languageCode;
-    final locale = AppLocaleUtils.supportedLocales.firstWhere(
-      (l) => l.languageCode == systemLang,
-      orElse: () => AppLocaleUtils.supportedLocales.first,
-    );
-    LocaleSettings.setLocale(locale);
+    LocaleSettings.setLocaleRaw(systemLang);
   } catch (e) {
     _logger.warning('i18n init failed: $e');
   }
