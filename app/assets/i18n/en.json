@@ -1,0 +1,59 @@
+{
+  "appName": "HyX",
+  "home": {
+    "online": "Online",
+    "refresh": "Refresh",
+    "startReceive": "Start Receiving",
+    "about": "About",
+    "scanning": "Scanning LAN…",
+    "noDevices": "No devices nearby",
+    "noDevicesHint": "Make sure other devices have HyX open and are on the same network"
+  },
+  "transfer": {
+    "inProgress": "Transferring",
+    "cancel": "Cancel",
+    "close": "Close",
+    "idle": "Idle",
+    "pairing": "Pairing",
+    "connecting": "Connecting",
+    "transferring": "Transferring",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "interrupted": "Interrupted",
+    "transferred": "Sent",
+    "total": "Total",
+    "speed": "Speed",
+    "elapsed": "Elapsed",
+    "remaining": "ETA"
+  },
+  "history": {
+    "title": "History",
+    "clear": "Clear",
+    "clearConfirm": "Clear all history records?",
+    "cancel": "Cancel",
+    "empty": "No history yet"
+  },
+  "log": {
+    "title": "Logs",
+    "copy": "Copy",
+    "clear": "Clear",
+    "empty": "No logs",
+    "copied": "Copied to clipboard",
+    "filterAll": "All"
+  },
+  "pair": {
+    "title": "Pairing Code",
+    "subtitle": "Fallback for cross-NAT",
+    "send": "Send",
+    "receive": "Receive",
+    "code": "Pairing Code",
+    "codeHint": "Enter 8-digit code",
+    "server": "Server Address",
+    "port": "Port",
+    "noFile": "No file selected",
+    "selectFile": "Select File",
+    "cancel": "Cancel",
+    "start": "Start"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "appName": "HyX",
+  "home": {
+    "online": "在线",
+    "refresh": "刷新",
+    "startReceive": "开始接收",
+    "about": "关于",
+    "scanning": "正在扫描局域网…",
+    "noDevices": "附近没有设备",
+    "noDevicesHint": "请确保其他设备已打开 HyX 并在同一网络"
+  },
+  "transfer": {
+    "inProgress": "传输中",
+    "cancel": "取消",
+    "close": "关闭",
+    "idle": "空闲",
+    "pairing": "配对中",
+    "connecting": "连接中",
+    "transferring": "传输中",
+    "completed": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消",
+    "interrupted": "已中断",
+    "transferred": "已传",
+    "total": "总量",
+    "speed": "速度",
+    "elapsed": "耗时",
+    "remaining": "剩余"
+  },
+  "history": {
+    "title": "历史记录",
+    "clear": "清空",
+    "clearConfirm": "确定清空所有历史记录吗？",
+    "cancel": "取消",
+    "empty": "暂无历史记录"
+  },
+  "log": {
+    "title": "日志",
+    "copy": "复制",
+    "clear": "清空",
+    "empty": "暂无日志",
+    "copied": "已复制到剪贴板",
+    "filterAll": "全部"
+  },
+  "pair": {
+    "title": "配对码连接",
+    "subtitle": "跨 NAT 备选方式",
+    "send": "发送",
+    "receive": "接收",
+    "code": "配对码",
+    "codeHint": "输入 8 位配对码",
+    "server": "服务器地址",
+    "port": "端口",
+    "noFile": "未选择文件",
+    "selectFile": "选择文件",
+    "cancel": "取消",
+    "start": "开始"
+  }
+}

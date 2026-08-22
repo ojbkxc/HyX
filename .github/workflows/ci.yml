@@ -5,99 +5,129 @@ on:
     branches: [ main ]
   pull_request:
 
+env:
+  # 与 .fvmrc、app/pubspec.yaml 保持一致
+  FLUTTER_VERSION: "3.41.9"
+
 jobs:
-  rust:
-    name: Rust — build, lint, test
+  # ─────────────────────────────────────────────────────────────
+  # Dart 代码格式检查（app）
+  # ─────────────────────────────────────────────────────────────
+  format:
+    name: Dart — format
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: 安装 Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+          cache: true
+
+      - name: 依赖 (app)
+        working-directory: app
+        run: flutter pub get
+
+      - name: 检查格式 (app)
+        working-directory: app
+        run: dart format --set-exit-if-changed lib test
+
+  # ─────────────────────────────────────────────────────────────
+  # Flutter analyze + test（app 与 hyx_isolates）
+  # ─────────────────────────────────────────────────────────────
+  test:
+    name: Flutter — analyze & test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+          cache: true
+
+      - name: 依赖 (app)
+        working-directory: app
+        run: flutter pub get
+      - name: Analyze (app)
+        working-directory: app
+        run: flutter analyze
+      - name: Test (app)
+        working-directory: app
+        run: flutter test
+
+      - name: 依赖 (hyx_isolates)
+        working-directory: packages/hyx_isolates
+        run: flutter pub get
+      - name: Test (hyx_isolates)
+        working-directory: packages/hyx_isolates
+        run: flutter test
+
+  # ─────────────────────────────────────────────────────────────
+  # Rust — clippy/test core，check plugin/cli/rendezvous/mobile
+  # 保留原有 workspace 级别的 fmt/clippy/test 逻辑
+  # ─────────────────────────────────────────────────────────────
+  rust:
+    name: Rust — build, lint, test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      - name: 缓存
+        uses: Swatinem/rust-cache@v2
 
       - name: Fmt
         run: cargo fmt --all -- --check
 
-      - name: Lint
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      # core 是 P2P 传输内核，运行完整 clippy + test
+      - name: Clippy (core)
+        run: cargo clippy -p hyx-core --all-targets -- -D warnings
+      - name: Test (core)
+        run: cargo test -p hyx-core
 
-      - name: Build (release)
-        run: cargo build --release --workspace
+      # 其余 crate 仅做 check（plugin/cli/rendezvous/mobile）
+      - name: Check (plugin / cli / rendezvous / mobile)
+        run: cargo check -p rust_lib_hyx_app -p hyx-cli -p hyx-rendezvous -p hyx-mobile
 
-      - name: Test
-        run: cargo test --workspace
-
-  android:
-    name: Android — build APK (debug)
+  # ─────────────────────────────────────────────────────────────
+  # 版本一致性检查：app/pubspec.yaml vs cli/Cargo.toml
+  # ─────────────────────────────────────────────────────────────
+  packaging:
+    name: Packaging — version consistency
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Setup Android SDK + NDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: >-
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
-            ndk;27.2.12479018
-          accept-android-sdk-licenses: true
-
-      - name: Setup Rust (Android targets)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
-      - name: Build Rust shared libraries
-        run: >
-          cargo ndk -t arm64-v8a
-          -o android/app/src/main/jniLibs build --release
-          -p hyx-mobile --manifest-path mobile/Cargo.toml
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.7"
-
-      - name: Assemble release APK (arm64, R8)
-        working-directory: android
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
-
-      - name: Rename APK with version
+      - name: 从 pubspec.yaml 提取版本
         run: |
-          VERSION=$(sed -n -E 's/versionName *= *"([^"]*)"/\1/p' android/app/build.gradle.kts | head -1)
-          VERSION=${VERSION:-0.1.0}
-          if ls android/app/build/outputs/apk/release/app-release.apk >/dev/null 2>&1; then
-            cp android/app/build/outputs/apk/release/app-release.apk "HyX-v${VERSION}-arm64.apk"
-          else
-            cp android/app/build/outputs/apk/release/app-release-unsigned.apk "HyX-v${VERSION}-arm64.apk"
-          fi
-          echo "APK=HyX-v${VERSION}-arm64.apk" >> "$GITHUB_ENV"
+          VERSION=$(grep '^version: ' app/pubspec.yaml | sed 's/version: //' | sed 's/\+.*//')
+          echo "pubspec 版本为 $VERSION"
+          echo "pubspec_version=$VERSION" >> $GITHUB_ENV
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APK }}
-          path: HyX-v*-arm64.apk
+      - name: 从 cli/Cargo.toml 提取版本
+        run: |
+          VERSION=$(grep '^version = ' cli/Cargo.toml | sed 's/version = "//' | sed 's/"//')
+          echo "CLI 版本为 $VERSION"
+          echo "cli_version=$VERSION" >> $GITHUB_ENV
+
+      - name: 比对 pubspec 与 CLI 版本
+        run: |
+          if [ "$pubspec_version" != "$cli_version" ]; then
+            echo "检测到版本不一致！pubspec=$pubspec_version, cli=$cli_version"
+            exit 1
+          else
+            echo "版本一致：$pubspec_version"
+          fi

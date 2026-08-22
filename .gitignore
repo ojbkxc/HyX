@@ -24,3 +24,21 @@ android/captures/
 *.apk
 *.so
 .cargo-ndk
+
+# CodeArts 工作目录
+.codeartsdoer/
+
+# Flutter / Dart
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/coverage/
+packages/hyx_isolates/.dart_tool/
+packages/hyx_isolates/build/
+**/.fvm/flutter_sdk/
+
+# Rust FRB 生成（由 codegen 产生）
+packages/hyx_isolates/rust/src/frb_generated.rs
+packages/hyx_isolates/rust/src/frb_generated.io.rs
+packages/hyx_isolates/lib/rust/

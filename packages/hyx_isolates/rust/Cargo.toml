@@ -1,0 +1,25 @@
+[package]
+name = "rust_lib_hyx_app"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+[dependencies]
+anyhow = "1.0"
+flutter_rust_bridge = { version = "=2.12.0", features = ["uuid"] }
+hyx-core = { path = "../../core" }
+log = "0.4"
+tokio = { version = "1.40", features = ["rt-multi-thread", "sync", "time"] }
+tracing = "0.1"
+tracing-core = "0.1"
+tracing-log = "0.2"
+tracing-subscriber = { version = "0.3", features = ["registry"] }
+uuid = { version = "1.0", features = ["v4"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+tracing-android = "0.2"
