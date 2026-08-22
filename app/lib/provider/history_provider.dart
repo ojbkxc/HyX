@@ -75,11 +75,7 @@ final historyProvider = ReduxProvider<HistoryService, HistoryState>((ref) => His
 
 class HistoryService extends ReduxNotifier<HistoryState> {
   @override
-  HistoryState init() {
-    // 异步加载已有记录（init 返回后执行）。
-    unawaited(dispatchAsync(_LoadHistoryAction()));
-    return const HistoryState();
-  }
+  HistoryState init() => const HistoryState();
 
   Future<void> _persist(List<HistoryRecord> records) async {
     try {
@@ -92,9 +88,9 @@ class HistoryService extends ReduxNotifier<HistoryState> {
   }
 }
 
-/// 内部：从 SharedPreferences 异步加载历史记录。
-class _LoadHistoryAction extends AsyncReduxAction<HistoryService, HistoryState> {
-  _LoadHistoryAction();
+/// 从 SharedPreferences 异步加载历史记录。由 `preInit` 触发一次。
+class LoadHistoryAction extends AsyncReduxAction<HistoryService, HistoryState> {
+  LoadHistoryAction();
 
   @override
   Future<HistoryState> reduce() async {

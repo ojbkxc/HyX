@@ -30,7 +30,7 @@ use tokio::runtime::{Builder, Runtime};
 use tokio::task::AbortHandle;
 
 use crate::api::device::{current_device_id, identity};
-use crate::api::model::{RsProgressEvent, RsTransferStatus};
+use crate::api::model::{RsProgressEvent, RsTransferDirection, RsTransferStatus};
 use crate::frb_generated::StreamSink;
 
 /// 全局 Tokio runtime，与 mobile `RT` 等价。
@@ -80,7 +80,10 @@ fn config_from(chunk_bytes: i32, compression: i32) -> ConfigMessage {
 ///
 /// 对应 mobile `progress_sink`：滑动窗口速率，避免每个 chunk 都回调淹没 UI。
 /// 与 mobile 差异：直接 `sink.add(RsProgressEvent { ... })`，无需 mpsc 中转。
-fn progress_sink(sink: StreamSink<RsProgressEvent>) -> ProgressCallback {
+fn progress_sink(
+    sink: StreamSink<RsProgressEvent>,
+    direction: RsTransferDirection,
+) -> ProgressCallback {
     struct Throttle {
         last_emit: Instant,
         last_done: u64,
@@ -105,6 +108,7 @@ fn progress_sink(sink: StreamSink<RsProgressEvent>) -> ProgressCallback {
         st.last_done = done;
         drop(st);
         let _ = sink.add(RsProgressEvent {
+            direction,
             phase: 2,
             transferred: done,
             total,
@@ -123,7 +127,7 @@ async fn receive_into(
 ) -> Result<()> {
     let out = PathBuf::from(dir);
     let mut prog = ProgressState::new(0);
-    prog.set_progress_callback(progress_sink(sink.clone()));
+    prog.set_progress_callback(progress_sink(sink.clone(), RsTransferDirection::Receive));
     session
         .receive_to(&out, None, |_| AcceptDecision::Accept, Some(&mut prog))
         .await?;
@@ -137,7 +141,7 @@ async fn send_path(
     sink: &StreamSink<RsProgressEvent>,
 ) -> Result<()> {
     let mut prog = ProgressState::new(0);
-    prog.set_progress_callback(progress_sink(sink.clone()));
+    prog.set_progress_callback(progress_sink(sink.clone(), RsTransferDirection::Send));
 
     let src = std::path::Path::new(path);
     let mut state_path = src.to_path_buf();
@@ -158,8 +162,14 @@ async fn send_path(
 }
 
 /// 发送最终事件（Completed / Failed）到 sink。
-fn emit_final(sink: &StreamSink<RsProgressEvent>, status: RsTransferStatus, msg: Option<String>) {
+fn emit_final(
+    sink: &StreamSink<RsProgressEvent>,
+    status: RsTransferStatus,
+    msg: Option<String>,
+    direction: RsTransferDirection,
+) {
     let _ = sink.add(RsProgressEvent {
+        direction,
         phase: 2,
         transferred: 0,
         total: 0,
@@ -232,7 +242,12 @@ pub fn start_listener(
                 if let Some(d) = discovery.as_ref() {
                     d.stop();
                 }
-                emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                emit_final(
+                    &sink_clone,
+                    RsTransferStatus::Failed,
+                    Some(e.to_string()),
+                    RsTransferDirection::Receive,
+                );
                 return;
             }
         };
@@ -241,8 +256,18 @@ pub fn start_listener(
             d.stop();
         }
         match res {
-            Ok(()) => emit_final(&sink_clone, RsTransferStatus::Completed, None),
-            Err(e) => emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string())),
+            Ok(()) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Completed,
+                None,
+                RsTransferDirection::Receive,
+            ),
+            Err(e) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Failed,
+                Some(e.to_string()),
+                RsTransferDirection::Receive,
+            ),
         }
     });
     track(join.abort_handle());
@@ -284,7 +309,12 @@ pub fn connect(
             let target = match P2PSession::resolve_peer_addr(&peer, port_u16).await {
                 Ok(a) => a,
                 Err(e) => {
-                    emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                    emit_final(
+                        &sink_clone,
+                        RsTransferStatus::Failed,
+                        Some(e.to_string()),
+                        RsTransferDirection::Send,
+                    );
                     return;
                 }
             };
@@ -298,7 +328,12 @@ pub fn connect(
             {
                 Ok(pair) => pair,
                 Err(e) => {
-                    emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                    emit_final(
+                        &sink_clone,
+                        RsTransferStatus::Failed,
+                        Some(e.to_string()),
+                        RsTransferDirection::Send,
+                    );
                     return;
                 }
             }
@@ -306,7 +341,12 @@ pub fn connect(
             match P2PSession::discover_one_peer(port_u16, &identity(), current_device_id()).await {
                 Ok(pair) => pair,
                 Err(e) => {
-                    emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                    emit_final(
+                        &sink_clone,
+                        RsTransferStatus::Failed,
+                        Some(e.to_string()),
+                        RsTransferDirection::Send,
+                    );
                     return;
                 }
             }
@@ -315,14 +355,29 @@ pub fn connect(
             match P2PSession::connect(addr, fp, identity(), current_device_id(), cfg).await {
                 Ok(s) => s,
                 Err(e) => {
-                    emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                    emit_final(
+                        &sink_clone,
+                        RsTransferStatus::Failed,
+                        Some(e.to_string()),
+                        RsTransferDirection::Send,
+                    );
                     return;
                 }
             };
         let res = send_path(&mut session, &path, &sink_clone).await;
         match res {
-            Ok(()) => emit_final(&sink_clone, RsTransferStatus::Completed, None),
-            Err(e) => emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string())),
+            Ok(()) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Completed,
+                None,
+                RsTransferDirection::Send,
+            ),
+            Err(e) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Failed,
+                Some(e.to_string()),
+                RsTransferDirection::Send,
+            ),
         }
     });
     track(join.abort_handle());
@@ -365,6 +420,7 @@ pub fn pair_rendezvous(
     let join = runtime().spawn(async move {
         // 通知 Dart 进入 Pairing 状态。
         let _ = sink_clone.add(RsProgressEvent {
+            direction: RsTransferDirection::Receive,
             phase: 0,
             transferred: 0,
             total: 0,
@@ -376,7 +432,12 @@ pub fn pair_rendezvous(
         let rv = match P2PSession::resolve_peer_addr(&server_o, port_u16).await {
             Ok(addr) => addr,
             Err(e) => {
-                emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                emit_final(
+                    &sink_clone,
+                    RsTransferStatus::Failed,
+                    Some(e.to_string()),
+                    RsTransferDirection::Receive,
+                );
                 return;
             }
         };
@@ -392,14 +453,29 @@ pub fn pair_rendezvous(
         {
             Ok(s) => s,
             Err(e) => {
-                emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                emit_final(
+                    &sink_clone,
+                    RsTransferStatus::Failed,
+                    Some(e.to_string()),
+                    RsTransferDirection::Receive,
+                );
                 return;
             }
         };
         let res = receive_into(&mut session, &dir, &sink_clone).await;
         match res {
-            Ok(()) => emit_final(&sink_clone, RsTransferStatus::Completed, None),
-            Err(e) => emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string())),
+            Ok(()) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Completed,
+                None,
+                RsTransferDirection::Receive,
+            ),
+            Err(e) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Failed,
+                Some(e.to_string()),
+                RsTransferDirection::Receive,
+            ),
         }
     });
     track(join.abort_handle());
@@ -442,6 +518,7 @@ pub fn pair_send(
 
     let join = runtime().spawn(async move {
         let _ = sink_clone.add(RsProgressEvent {
+            direction: RsTransferDirection::Send,
             phase: 0,
             transferred: 0,
             total: 0,
@@ -453,7 +530,12 @@ pub fn pair_send(
         let rv = match P2PSession::resolve_peer_addr(&server_o, port_u16).await {
             Ok(addr) => addr,
             Err(e) => {
-                emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                emit_final(
+                    &sink_clone,
+                    RsTransferStatus::Failed,
+                    Some(e.to_string()),
+                    RsTransferDirection::Send,
+                );
                 return;
             }
         };
@@ -469,14 +551,29 @@ pub fn pair_send(
         {
             Ok(s) => s,
             Err(e) => {
-                emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
+                emit_final(
+                    &sink_clone,
+                    RsTransferStatus::Failed,
+                    Some(e.to_string()),
+                    RsTransferDirection::Send,
+                );
                 return;
             }
         };
         let res = send_path(&mut session, &path, &sink_clone).await;
         match res {
-            Ok(()) => emit_final(&sink_clone, RsTransferStatus::Completed, None),
-            Err(e) => emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string())),
+            Ok(()) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Completed,
+                None,
+                RsTransferDirection::Send,
+            ),
+            Err(e) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Failed,
+                Some(e.to_string()),
+                RsTransferDirection::Send,
+            ),
         }
     });
     track(join.abort_handle());

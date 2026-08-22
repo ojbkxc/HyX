@@ -68,7 +68,7 @@ class LogService extends ReduxNotifier<LogState> {
   @override
   LogState init() => const LogState();
 
-  StreamSubscription? _sub;
+  StreamSubscription<model.RsLogEvent>? _sub;
 }
 
 const _kMaxLogs = 1000;

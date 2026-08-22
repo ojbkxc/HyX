@@ -19,6 +19,7 @@ pub enum RsDeviceVia {
 
 /// 传输方向。对应 mobile `hyxConnect`（Send）与 `hyxStartListener`/`hyxPairRendezvous`（Receive）。
 #[frb]
+#[derive(Clone)]
 pub enum RsTransferDirection {
     Send,
     Receive,
@@ -26,6 +27,7 @@ pub enum RsTransferDirection {
 
 /// 传输状态机。对应 Kotlin 侧 `TransferStatus`，由 `RsProgressEvent::phase` 推进。
 #[frb]
+#[derive(Clone)]
 pub enum RsTransferStatus {
     /// 空闲，无活动会话。
     Idle,
@@ -63,6 +65,8 @@ pub enum RsLogLevel {
 #[frb]
 #[derive(Clone)]
 pub struct RsProgressEvent {
+    /// 传输方向（发送/接收），使 `RsTransferDirection` 进入 FFI 类型图。
+    pub direction: RsTransferDirection,
     /// 传输阶段，对应 mobile `onProgress` 的第一个 int 参数。
     pub phase: i32,
     /// 已传输字节数。

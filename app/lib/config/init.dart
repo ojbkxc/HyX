@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:hyx_app/provider/history_provider.dart';
 import 'package:hyx_app/provider/log_provider.dart';
 import 'package:hyx_app/util/i18n.dart';
 import 'package:hyx_isolates/rust/api/logging.dart' as rust_logging;
@@ -86,6 +87,9 @@ Future<RefenaContainer> preInit(List<String> args) async {
   } catch (e) {
     _logger.warning('Log callback install failed: $e');
   }
+
+  // 启动时加载持久化的历史记录。
+  unawaited(container.redux(historyProvider).dispatchAsync(LoadHistoryAction()));
 
   return container;
 }

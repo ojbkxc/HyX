@@ -95,7 +95,7 @@ class TransferService extends ReduxNotifier<TransferState> {
   TransferState init() => TransferState.idle;
 
   /// 当前活动的进度流订阅，cancel / 完成后取消。
-  StreamSubscription? _sub;
+  StreamSubscription<model.RsProgressEvent>? _sub;
 }
 
 /// 启动监听接收。
