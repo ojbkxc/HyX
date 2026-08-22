@@ -43,10 +43,13 @@ pub async fn discover_peers(port: Option<u16>) -> Vec<Peer> {
         manager.stop();
         peers
             .into_iter()
-            .map(|p| Peer {
-                device_name: p.device_name,
-                address: p.socket_addr().to_string(),
-                device_id: p.device_id.to_string(),
+            .map(|p| {
+                let address = p.socket_addr();
+                Peer {
+                    device_name: p.device_name,
+                    address: address.to_string(),
+                    device_id: p.device_id.to_string(),
+                }
             })
             .collect()
     })
