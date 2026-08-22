@@ -64,10 +64,13 @@ pub async fn discover(port: i32) -> Result<Vec<RsDiscoveredPeer>> {
 
     let result = peers
         .into_iter()
-        .map(|p| RsDiscoveredPeer {
-            name: p.device_name,
-            addr: p.socket_addr().to_string(),
-            device_id: p.device_id,
+        .map(|p| {
+            let addr = p.socket_addr();
+            RsDiscoveredPeer {
+                name: p.device_name,
+                addr: addr.to_string(),
+                device_id: p.device_id,
+            }
         })
         .collect();
     Ok(result)

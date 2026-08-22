@@ -61,6 +61,7 @@ pub enum RsLogLevel {
 /// `transferred` / `total` 为字节，`speed` 为字节/秒（mobile 中为 i64，此处用 f64
 /// 以避免 FRB 对负值的额外处理）。
 #[frb]
+#[derive(Clone)]
 pub struct RsProgressEvent {
     /// 传输阶段，对应 mobile `onProgress` 的第一个 int 参数。
     pub phase: i32,
