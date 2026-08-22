@@ -10,7 +10,7 @@ use hyx_core::Uuid;
 
 /// 设备连接方式：局域网直连或经 rendezvous 服务器中继握手。
 #[frb]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum RsDeviceVia {
     /// LAN UDP 广播发现的 peer，直连 QUIC。
     Lan,
@@ -20,7 +20,7 @@ pub enum RsDeviceVia {
 
 /// 传输方向。对应 mobile `hyxConnect`（Send）与 `hyxStartListener`/`hyxPairRendezvous`（Receive）。
 #[frb]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum RsTransferDirection {
     Send,
     Receive,
@@ -28,7 +28,7 @@ pub enum RsTransferDirection {
 
 /// 传输状态机。对应 Kotlin 侧 `TransferStatus`，由 `RsProgressEvent::phase` 推进。
 #[frb]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum RsTransferStatus {
     /// 空闲，无活动会话。
     Idle,
@@ -49,7 +49,7 @@ pub enum RsTransferStatus {
 /// `tracing` Level 序数，与 mobile `level_to_int` 一致：
 /// 0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR。
 #[frb]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum RsLogLevel {
     Trace,
     Debug,
