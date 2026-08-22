@@ -291,6 +291,34 @@ jobs:
         working-directory: app
         run: dart run slang
 
+      - name: 创建 deb 打包配置
+        working-directory: app
+        run: |
+          mkdir -p linux/packaging/deb
+          cat > linux/packaging/deb/make_config.yaml << 'YAML'
+          display_name: HyX
+          package_name: hyx
+          maintainer:
+            name: ojbkxc
+            email: dev@hyx.io
+          priority: optional
+          section: x11
+          essential: false
+          icon: assets/img/logo-512.png
+          dependencies:
+            - libgtk-3-0
+          keywords:
+            - P2P
+            - FileTransfer
+            - QUIC
+          generic_name: P2P file transfer over QUIC
+          categories:
+            - GTK
+            - FileTransfer
+            - Utility
+          startup_notify: true
+          YAML
+
       - name: 构建 deb 包
         working-directory: app
         run: PATH="$PATH:$HOME/.pub-cache/bin" flutter_distributor package --platform linux --targets deb
@@ -361,6 +389,34 @@ jobs:
       - name: 生成 i18n 代码
         working-directory: app
         run: dart run slang
+
+      - name: 创建 deb 打包配置
+        working-directory: app
+        run: |
+          mkdir -p linux/packaging/deb
+          cat > linux/packaging/deb/make_config.yaml << 'YAML'
+          display_name: HyX
+          package_name: hyx
+          maintainer:
+            name: ojbkxc
+            email: dev@hyx.io
+          priority: optional
+          section: x11
+          essential: false
+          icon: assets/img/logo-512.png
+          dependencies:
+            - libgtk-3-0
+          keywords:
+            - P2P
+            - FileTransfer
+            - QUIC
+          generic_name: P2P file transfer over QUIC
+          categories:
+            - GTK
+            - FileTransfer
+            - Utility
+          startup_notify: true
+          YAML
 
       - name: 构建 deb 包
         working-directory: app
@@ -748,7 +804,7 @@ jobs:
       - name: 打包 zip
         run: |
           cd app/build/macos/Build/Products/Release
-          zip -r ../../../../../../HyX-${{ needs.build.outputs.version }}-macos.zip hyx_app.app
+          zip -r ../../../../../HyX-${{ needs.build.outputs.version }}-macos.zip hyx_app.app
 
       - name: 上传 zip
         uses: actions/upload-artifact@v4
