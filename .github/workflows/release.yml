@@ -89,6 +89,10 @@ jobs:
         working-directory: ${{ env.APK_BUILD_DIR }}/app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
+      - name: 更新 Gradle 版本
+        working-directory: ${{ env.APK_BUILD_DIR }}/app
+        run: sed -i 's/gradle-[0-9.]*-all.zip/gradle-8.13-all.zip/' android/gradle/wrapper/gradle-wrapper.properties
+
       - name: 依赖
         working-directory: ${{ env.APK_BUILD_DIR }}/app
         run: flutter pub get
@@ -295,30 +299,7 @@ jobs:
         working-directory: app
         run: |
           mkdir -p linux/packaging/deb
-          cat > linux/packaging/deb/make_config.yaml << 'YAML'
-          display_name: HyX
-          package_name: hyx
-          maintainer:
-            name: ojbkxc
-            email: dev@hyx.io
-          priority: optional
-          section: x11
-          essential: false
-          installed_size: 50000
-          icon: assets/img/logo-512.png
-          dependencies:
-            - libgtk-3-0
-          keywords:
-            - P2P
-            - FileTransfer
-            - QUIC
-          generic_name: P2P file transfer over QUIC
-          categories:
-            - GTK
-            - FileTransfer
-            - Utility
-          startup_notify: true
-          YAML
+          cp ../../support/build/deb/make_config.yaml linux/packaging/deb/make_config.yaml
 
       - name: 构建 deb 包
         working-directory: app
@@ -395,30 +376,7 @@ jobs:
         working-directory: app
         run: |
           mkdir -p linux/packaging/deb
-          cat > linux/packaging/deb/make_config.yaml << 'YAML'
-          display_name: HyX
-          package_name: hyx
-          maintainer:
-            name: ojbkxc
-            email: dev@hyx.io
-          priority: optional
-          section: x11
-          essential: false
-          installed_size: 50000
-          icon: assets/img/logo-512.png
-          dependencies:
-            - libgtk-3-0
-          keywords:
-            - P2P
-            - FileTransfer
-            - QUIC
-          generic_name: P2P file transfer over QUIC
-          categories:
-            - GTK
-            - FileTransfer
-            - Utility
-          startup_notify: true
-          YAML
+          cp ../../support/build/deb/make_config.yaml linux/packaging/deb/make_config.yaml
 
       - name: 构建 deb 包
         working-directory: app
