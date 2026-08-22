@@ -5,6 +5,7 @@ import 'package:hyx_app/gen/strings.g.dart';
 import 'package:hyx_app/provider/history_provider.dart';
 import 'package:hyx_app/provider/transfer_provider.dart';
 import 'package:hyx_app/util/formatters.dart';
+import 'package:hyx_app/util/transfer_direction.dart';
 import 'package:hyx_app/widget/ring_progress.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:refena_flutter/refena_flutter.dart';
@@ -75,7 +76,7 @@ class _TransferProgressSheetState extends State<TransferProgressSheet> with Refe
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                st.direction == model.RsTransferDirection.send ? Icons.arrow_upward : Icons.arrow_downward,
+                st.direction == RsTransferDirection.send ? Icons.arrow_upward : Icons.arrow_downward,
                 size: 18,
                 color: scheme.primary,
               ),
