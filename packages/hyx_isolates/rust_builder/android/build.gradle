@@ -1,5 +1,5 @@
-# rust_lib_hyx_app — Android Gradle build
-# The Android Gradle Plugin builds the native code with the Android NDK.
+// rust_lib_hyx_app — Android Gradle build
+// The Android Gradle Plugin builds the native code with the Android NDK.
 
 group 'com.flutter_rust_bridge.rust_lib_hyx_app'
 version '1.0'

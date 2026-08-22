@@ -304,6 +304,7 @@ jobs:
           priority: optional
           section: x11
           essential: false
+          installed_size: 50000
           icon: assets/img/logo-512.png
           dependencies:
             - libgtk-3-0
@@ -403,6 +404,7 @@ jobs:
           priority: optional
           section: x11
           essential: false
+          installed_size: 50000
           icon: assets/img/logo-512.png
           dependencies:
             - libgtk-3-0
