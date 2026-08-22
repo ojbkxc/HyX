@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:hyx_app/gen/strings.g.dart';
 import 'package:hyx_app/pages/history_drawer.dart';
 import 'package:hyx_app/pages/log_sheet.dart';
-import 'package:hyx_app/pages/pairing_dialog.dart';
+
 import 'package:hyx_app/pages/transfer_progress_sheet.dart';
 import 'package:hyx_app/provider/device_provider.dart';
 import 'package:hyx_app/provider/log_provider.dart';
@@ -119,7 +119,7 @@ class _HomePageState extends State<HomePage> with Refena {
     );
   }
 
-  /// 侧边栏 Drawer：本设备信息 + 历史记录 + 配对码入口 + 设置。
+  /// 侧边栏 Drawer：本设备信息 + 历史记录 + 设置。
   Widget _buildDrawer(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final devState = context.watch(deviceProvider);
@@ -147,15 +147,7 @@ class _HomePageState extends State<HomePage> with Refena {
             const Divider(height: 1),
             // 底部操作。
             ListTile(
-              leading: const Icon(Icons.qr_code),
-              title: Text(t.pair.title),
-              subtitle: Text(t.pair.subtitle),
-              onTap: () {
-                Navigator.pop(context); // 关闭 Drawer。
-                unawaited(showPairingDialog(context));
-              },
-            ),
-            ListTile(
+
               leading: const Icon(Icons.article),
               title: Text(t.log.title),
               onTap: () {

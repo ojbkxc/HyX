@@ -52,19 +52,6 @@
     "empty": "No logs",
     "copied": "Copied to clipboard",
     "filterAll": "All"
-  },
-  "pair": {
-    "title": "Pairing Code",
-    "subtitle": "Fallback for cross-NAT",
-    "send": "Send",
-    "receive": "Receive",
-    "code": "Pairing Code",
-    "codeHint": "Enter 8-digit code",
-    "server": "Server Address",
-    "port": "Port",
-    "noFile": "No file selected",
-    "selectFile": "Select File",
-    "cancel": "Cancel",
-    "start": "Start"
+
   }
 }

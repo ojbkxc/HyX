@@ -52,19 +52,6 @@
     "empty": "暂无日志",
     "copied": "已复制到剪贴板",
     "filterAll": "全部"
-  },
-  "pair": {
-    "title": "配对码连接",
-    "subtitle": "跨 NAT 备选方式",
-    "send": "发送",
-    "receive": "接收",
-    "code": "配对码",
-    "codeHint": "输入 8 位配对码",
-    "server": "服务器地址",
-    "port": "端口",
-    "noFile": "未选择文件",
-    "selectFile": "选择文件",
-    "cancel": "取消",
-    "start": "开始"
+
   }
 }
