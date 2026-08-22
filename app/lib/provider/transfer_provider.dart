@@ -125,7 +125,7 @@ class TransferService extends ReduxNotifier<TransferState> {
   void _syncBlockedDevices() {
     try {
       final blockedIds = _deviceService.state.blockedDeviceIds;
-      rust_transfer.setBlockedDevices(ids: blockedIds);
+      unawaited(rust_transfer.setBlockedDevices(ids: blockedIds));
     } catch (e) {
       _logger.warning('setBlockedDevices failed: $e');
     }
