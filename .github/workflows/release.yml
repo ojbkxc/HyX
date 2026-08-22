@@ -114,7 +114,7 @@ jobs:
         with:
           name: apk-result
           path: |
-            ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-release.apk
 
   # ─────────────────────────────────────────────────────────────
   # Linux x86_64 tar.gz（ubuntu-22.04）
@@ -832,7 +832,7 @@ jobs:
           VERSION=${{ needs.build.outputs.version }}
           mkdir -p release-assets
           # APK（arm64）
-          cp all-artifacts/apk-result/app-arm64-v8a-release.apk    "release-assets/HyX-$VERSION-android-arm64v8.apk" 2>/dev/null || true
+          cp all-artifacts/apk-result/app-release.apk    "release-assets/HyX-$VERSION-android-arm64v8.apk" 2>/dev/null || true
           # Linux tar.gz
           cp all-artifacts/tar-gz-x86-64-result/*.tar.gz "release-assets/HyX-$VERSION-linux-x86-64.tar.gz" 2>/dev/null || true
           cp all-artifacts/tar-gz-arm-64-result/*.tar.gz "release-assets/HyX-$VERSION-linux-arm-64.tar.gz" 2>/dev/null || true
