@@ -347,13 +347,12 @@ impl<S: tracing_core::Subscriber> Layer<S> for JniLogLayer {
 /// Map a `tracing` `Level` to the int ordinal expected by Kotlin's
 /// `LogLevel` enum (0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR).
 fn level_to_int(l: &tracing_core::Level) -> jint {
-    use tracing_core::Level;
-    match l {
-        Level::TRACE => 0,
-        Level::DEBUG => 1,
-        Level::INFO => 2,
-        Level::WARN => 3,
-        Level::ERROR => 4,
+    match *l {
+        tracing_core::Level::TRACE => 0,
+        tracing_core::Level::DEBUG => 1,
+        tracing_core::Level::INFO => 2,
+        tracing_core::Level::WARN => 3,
+        tracing_core::Level::ERROR => 4,
     }
 }
 
@@ -766,10 +765,8 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxSetLogCallback<'loc
     // 4. Install the global tracing subscriber. `set_global_default` errors if
     //    one already exists — we ignore that, matching the "first call wins"
     //    semantics of the `OnceLock`s above.
-    use tracing_subscriber::prelude::*;
-    let _ = tracing_subscriber::registry()
-        .with(JniLogLayer)
-        .set_global_default();
+    let subscriber = tracing_subscriber::registry().with(JniLogLayer);
+    let _ = tracing::subscriber::set_global_default(subscriber);
 
     // 5. Bridge the `log` crate onto `tracing` so any `log::info!`/`log::warn!`
     //    inside hyx-core (or dependencies) is forwarded to `JniLogLayer` too.
