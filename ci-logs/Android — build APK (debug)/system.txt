@@ -1,0 +1,7 @@
+2026-08-21T23:42:54.7450000Z Evaluating android.if
+2026-08-21T23:42:54.7450000Z Evaluating: success()
+2026-08-21T23:42:54.7450000Z Result: true
+2026-08-21T23:42:55.2010000Z Requested labels: ubuntu-latest
+2026-08-21T23:42:55.2010000Z Job defined at: ojbkxc/HyX/.github/workflows/ci.yml@refs/heads/main
+2026-08-21T23:42:55.2010000Z Waiting for a runner to pick up this job...
+2026-08-21T23:42:55.2120000Z Job is about to start running on the hosted runner: GitHub Actions 1000005094

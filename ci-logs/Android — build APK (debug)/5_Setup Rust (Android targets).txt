@@ -1,0 +1,227 @@
+﻿2026-08-21T23:43:26.4144013Z ##[group]Run dtolnay/rust-toolchain@stable
+2026-08-21T23:43:26.4144353Z with:
+2026-08-21T23:43:26.4144560Z   targets: aarch64-linux-android
+2026-08-21T23:43:26.4144823Z   toolchain: stable
+2026-08-21T23:43:26.4145031Z env:
+2026-08-21T23:43:26.4145327Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4145855Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4146271Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4146567Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4146840Z ##[endgroup]
+2026-08-21T23:43:26.4220043Z ##[start-action display=Parse toolchain version;id=__dtolnay_rust-toolchain.parse]
+2026-08-21T23:43:26.4271976Z ##[group]Run if [[ -z $toolchain ]]; then
+2026-08-21T23:43:26.4272363Z [36;1mif [[ -z $toolchain ]]; then[0m
+2026-08-21T23:43:26.4272930Z [36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070[0m
+2026-08-21T23:43:26.4273548Z [36;1m  echo "'toolchain' is a required input" >&2[0m
+2026-08-21T23:43:26.4273843Z [36;1m  exit 1[0m
+2026-08-21T23:43:26.4274175Z [36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then[0m
+2026-08-21T23:43:26.4274589Z [36;1m  if [[ Linux == macOS ]]; then[0m
+2026-08-21T23:43:26.4275134Z [36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:26.4275645Z [36;1m  else[0m
+2026-08-21T23:43:26.4276049Z [36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:26.4276508Z [36;1m  fi[0m
+2026-08-21T23:43:26.4276800Z [36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then[0m
+2026-08-21T23:43:26.4277333Z [36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:26.4277792Z [36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then[0m
+2026-08-21T23:43:26.4278545Z [36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:26.4279043Z [36;1melse[0m
+2026-08-21T23:43:26.4279285Z [36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:26.4279796Z [36;1mfi[0m
+2026-08-21T23:43:26.4320132Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:26.4320490Z env:
+2026-08-21T23:43:26.4320796Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4321310Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4321758Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4322062Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4322355Z   toolchain: stable
+2026-08-21T23:43:26.4322558Z ##[endgroup]
+2026-08-21T23:43:26.4435155Z ##[end-action id=__dtolnay_rust-toolchain.parse;outcome=success;conclusion=success;duration_ms=21]
+2026-08-21T23:43:26.4441910Z ##[start-action display=Construct rustup command line;id=__dtolnay_rust-toolchain.flags]
+2026-08-21T23:43:26.4458741Z ##[group]Run echo "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT
+2026-08-21T23:43:26.4459413Z [36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:26.4460081Z [36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:26.4460581Z [36;1mecho "downgrade=" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:26.4495799Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:26.4496147Z env:
+2026-08-21T23:43:26.4496449Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4496943Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4497562Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4497862Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4498381Z   targets: aarch64-linux-android
+2026-08-21T23:43:26.4498645Z   components: 
+2026-08-21T23:43:26.4498836Z ##[endgroup]
+2026-08-21T23:43:26.4569561Z ##[end-action id=__dtolnay_rust-toolchain.flags;outcome=success;conclusion=success;duration_ms=12]
+2026-08-21T23:43:26.4571668Z ##[start-action display=Set $CARGO_HOME;id=__dtolnay_rust-toolchain.__run]
+2026-08-21T23:43:26.4587285Z ##[group]Run echo CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV
+2026-08-21T23:43:26.4587759Z [36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV[0m
+2026-08-21T23:43:26.4621187Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:26.4621526Z env:
+2026-08-21T23:43:26.4621822Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4622327Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4622744Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4623044Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4623314Z ##[endgroup]
+2026-08-21T23:43:26.4683645Z ##[end-action id=__dtolnay_rust-toolchain.__run;outcome=success;conclusion=success;duration_ms=11]
+2026-08-21T23:43:26.4685674Z ##[start-action display=Install rustup if needed;id=__dtolnay_rust-toolchain.__run_2]
+2026-08-21T23:43:26.4706083Z ##[group]Run if ! command -v rustup &>/dev/null; then
+2026-08-21T23:43:26.4706466Z [36;1mif ! command -v rustup &>/dev/null; then[0m
+2026-08-21T23:43:26.4707236Z [36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y[0m
+2026-08-21T23:43:26.4707981Z [36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH[0m
+2026-08-21T23:43:26.4708607Z [36;1mfi[0m
+2026-08-21T23:43:26.4742605Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:26.4742960Z env:
+2026-08-21T23:43:26.4743267Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4743767Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4744170Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4744634Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4744927Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:26.4745169Z ##[endgroup]
+2026-08-21T23:43:26.4806220Z ##[end-action id=__dtolnay_rust-toolchain.__run_2;outcome=success;conclusion=success;duration_ms=11]
+2026-08-21T23:43:26.4808662Z ##[start-action display=Install rustup if needed on windows;id=__dtolnay_rust-toolchain.__run_3]
+2026-08-21T23:43:26.4813938Z ##[end-action id=__dtolnay_rust-toolchain.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-08-21T23:43:26.4824596Z ##[start-action display=rustup toolchain install stable;id=__dtolnay_rust-toolchain.__run_4]
+2026-08-21T23:43:26.4841018Z ##[group]Run rustup toolchain install stable --target aarch64-linux-android --profile minimal --no-self-update
+2026-08-21T23:43:26.4841789Z [36;1mrustup toolchain install stable --target aarch64-linux-android --profile minimal --no-self-update[0m
+2026-08-21T23:43:26.4874668Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:26.4875015Z env:
+2026-08-21T23:43:26.4875313Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4875796Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:26.4876212Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4876505Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:26.4876794Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:26.4877052Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-08-21T23:43:26.4877286Z ##[endgroup]
+2026-08-21T23:43:26.6509734Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+2026-08-21T23:43:26.7497154Z info: latest update on 2026-08-20 for version 1.98.0 (88d9e12ae 2026-08-18)
+2026-08-21T23:43:26.7631120Z info: removing previous version of component clippy
+2026-08-21T23:43:26.7645495Z info: removing previous version of component rustfmt
+2026-08-21T23:43:26.7656397Z info: removing previous version of component cargo
+2026-08-21T23:43:26.7702697Z info: removing previous version of component rust-std
+2026-08-21T23:43:26.7750175Z info: removing previous version of component rustc
+2026-08-21T23:43:26.7803281Z info: downloading 6 components
+2026-08-21T23:43:36.9285361Z 
+2026-08-21T23:43:36.9371406Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.98.0 (88d9e12ae 2026-08-18) (from rustc 1.97.1 (8bab26f4f 2026-07-14))
+2026-08-21T23:43:36.9372316Z 
+2026-08-21T23:43:36.9443383Z ##[end-action id=__dtolnay_rust-toolchain.__run_4;outcome=success;conclusion=success;duration_ms=10461]
+2026-08-21T23:43:36.9449440Z ##[start-action display=rustup default stable;id=__dtolnay_rust-toolchain.__run_5]
+2026-08-21T23:43:36.9466243Z ##[group]Run rustup default stable
+2026-08-21T23:43:36.9466560Z [36;1mrustup default stable[0m
+2026-08-21T23:43:36.9503909Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:36.9504247Z env:
+2026-08-21T23:43:36.9504551Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:36.9505070Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:36.9505483Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:36.9505781Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:36.9506116Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:36.9506453Z ##[endgroup]
+2026-08-21T23:43:36.9645077Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-08-21T23:43:36.9651704Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-08-21T23:43:36.9652087Z 
+2026-08-21T23:43:36.9720686Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.0 (88d9e12ae 2026-08-18)
+2026-08-21T23:43:36.9722380Z info: note that the toolchain 'stable-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/HyX/HyX/rust-toolchain.toml')
+2026-08-21T23:43:36.9723031Z 
+2026-08-21T23:43:36.9738758Z ##[end-action id=__dtolnay_rust-toolchain.__run_5;outcome=success;conclusion=success;duration_ms=28]
+2026-08-21T23:43:36.9741488Z ##[start-action display=Create cachekey;id=__dtolnay_rust-toolchain.rustc-version]
+2026-08-21T23:43:36.9759646Z ##[group]Run DATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')
+2026-08-21T23:43:36.9760509Z [36;1mDATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')[0m
+2026-08-21T23:43:36.9761165Z [36;1mHASH=$(rustc +stable --version --verbose | sed -ne 's/^commit-hash: //p')[0m
+2026-08-21T23:43:36.9761670Z [36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT[0m
+2026-08-21T23:43:36.9798940Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:36.9799294Z env:
+2026-08-21T23:43:36.9799599Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:36.9800094Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:36.9800506Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:36.9800807Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:36.9801097Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:36.9801332Z ##[endgroup]
+2026-08-21T23:43:37.0142024Z ##[end-action id=__dtolnay_rust-toolchain.rustc-version;outcome=success;conclusion=success;duration_ms=39]
+2026-08-21T23:43:37.0144522Z ##[start-action display=Disable incremental compilation;id=__dtolnay_rust-toolchain.__run_6]
+2026-08-21T23:43:37.0160207Z ##[group]Run if [ -z "${CARGO_INCREMENTAL+set}" ]; then
+2026-08-21T23:43:37.0160580Z [36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then[0m
+2026-08-21T23:43:37.0161099Z [36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV[0m
+2026-08-21T23:43:37.0161382Z [36;1mfi[0m
+2026-08-21T23:43:37.0197926Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:37.0198470Z env:
+2026-08-21T23:43:37.0198777Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.0199292Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.0199691Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.0199991Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.0200280Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:37.0200520Z ##[endgroup]
+2026-08-21T23:43:37.0265120Z ##[end-action id=__dtolnay_rust-toolchain.__run_6;outcome=success;conclusion=success;duration_ms=11]
+2026-08-21T23:43:37.0267199Z ##[start-action display=Enable colors in Cargo output;id=__dtolnay_rust-toolchain.__run_7]
+2026-08-21T23:43:37.0281802Z ##[group]Run if [ -z "${CARGO_TERM_COLOR+set}" ]; then
+2026-08-21T23:43:37.0282193Z [36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then[0m
+2026-08-21T23:43:37.0282532Z [36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV[0m
+2026-08-21T23:43:37.0282825Z [36;1mfi[0m
+2026-08-21T23:43:37.0317870Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:37.0318462Z env:
+2026-08-21T23:43:37.0318785Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.0319294Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.0319710Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.0320006Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.0320297Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:37.0320543Z   CARGO_INCREMENTAL: 0
+2026-08-21T23:43:37.0320755Z ##[endgroup]
+2026-08-21T23:43:37.0382594Z ##[end-action id=__dtolnay_rust-toolchain.__run_7;outcome=success;conclusion=success;duration_ms=11]
+2026-08-21T23:43:37.0385000Z ##[start-action display=Enable Cargo sparse registry;id=__dtolnay_rust-toolchain.__run_8]
+2026-08-21T23:43:37.0400969Z ##[group]Run # implemented in 1.66, stabilized in 1.68, made default in 1.70
+2026-08-21T23:43:37.0401491Z [36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70[0m
+2026-08-21T23:43:37.0402198Z [36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then[0m
+2026-08-21T23:43:37.0403091Z [36;1m  if rustc +stable --version --verbose | grep -q '^release: 1\.6[89]\.'; then[0m
+2026-08-21T23:43:37.0403661Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-08-21T23:43:37.0404197Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV[0m
+2026-08-21T23:43:37.0404694Z [36;1m  elif rustc +stable --version --verbose | grep -q '^release: 1\.6[67]\.'; then[0m
+2026-08-21T23:43:37.0405263Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-08-21T23:43:37.0405790Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV[0m
+2026-08-21T23:43:37.0406133Z [36;1m  fi[0m
+2026-08-21T23:43:37.0406320Z [36;1mfi[0m
+2026-08-21T23:43:37.0439307Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:37.0439652Z env:
+2026-08-21T23:43:37.0439950Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.0440450Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.0440848Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.0441143Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.0441432Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:37.0441691Z   CARGO_INCREMENTAL: 0
+2026-08-21T23:43:37.0441911Z   CARGO_TERM_COLOR: always
+2026-08-21T23:43:37.0442131Z ##[endgroup]
+2026-08-21T23:43:37.0757261Z ##[end-action id=__dtolnay_rust-toolchain.__run_8;outcome=success;conclusion=success;duration_ms=37]
+2026-08-21T23:43:37.0760430Z ##[start-action display=Work around spurious network errors in curl 8.0;id=__dtolnay_rust-toolchain.__run_9]
+2026-08-21T23:43:37.0777174Z ##[group]Run # https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation
+2026-08-21T23:43:37.0777947Z [36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation[0m
+2026-08-21T23:43:37.0779066Z [36;1mif rustc +stable --version --verbose | grep -q '^release: 1\.7[01]\.'; then[0m
+2026-08-21T23:43:37.0779545Z [36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV[0m
+2026-08-21T23:43:37.0779869Z [36;1mfi[0m
+2026-08-21T23:43:37.0816428Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:37.0816771Z env:
+2026-08-21T23:43:37.0817072Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.0817569Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.0817981Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.0818550Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.0818858Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:37.0819113Z   CARGO_INCREMENTAL: 0
+2026-08-21T23:43:37.0819333Z   CARGO_TERM_COLOR: always
+2026-08-21T23:43:37.0819565Z ##[endgroup]
+2026-08-21T23:43:37.1007553Z ##[end-action id=__dtolnay_rust-toolchain.__run_9;outcome=success;conclusion=success;duration_ms=24]
+2026-08-21T23:43:37.1011353Z ##[start-action display=rustc +stable --version --verbose;id=__dtolnay_rust-toolchain.__run_10]
+2026-08-21T23:43:37.1026550Z ##[group]Run rustc +stable --version --verbose
+2026-08-21T23:43:37.1026892Z [36;1mrustc +stable --version --verbose[0m
+2026-08-21T23:43:37.1062811Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-08-21T23:43:37.1063149Z env:
+2026-08-21T23:43:37.1063452Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.1063964Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.20-8/x64
+2026-08-21T23:43:37.1064366Z   ANDROID_HOME: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.1064662Z   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+2026-08-21T23:43:37.1064958Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:37.1065203Z   CARGO_INCREMENTAL: 0
+2026-08-21T23:43:37.1065587Z   CARGO_TERM_COLOR: always
+2026-08-21T23:43:37.1065805Z ##[endgroup]
+2026-08-21T23:43:37.1232061Z rustc 1.98.0 (88d9e12ae 2026-08-18)
+2026-08-21T23:43:37.1232928Z binary: rustc
+2026-08-21T23:43:37.1233502Z commit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea
+2026-08-21T23:43:37.1233954Z commit-date: 2026-08-18
+2026-08-21T23:43:37.1234373Z host: x86_64-unknown-linux-gnu
+2026-08-21T23:43:37.1234857Z release: 1.98.0
+2026-08-21T23:43:37.1235275Z LLVM version: 22.1.8
+2026-08-21T23:43:37.1247640Z ##[end-action id=__dtolnay_rust-toolchain.__run_10;outcome=success;conclusion=success;duration_ms=23]

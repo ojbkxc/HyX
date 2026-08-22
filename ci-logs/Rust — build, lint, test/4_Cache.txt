@@ -1,0 +1,31 @@
+﻿2026-08-21T23:43:09.1479530Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-08-21T23:43:09.1481637Z ##[group]Run actions/cache@v4
+2026-08-21T23:43:09.1481905Z with:
+2026-08-21T23:43:09.1482146Z   path: ~/.cargo/registry
+~/.cargo/git
+target
+
+2026-08-21T23:43:09.1482625Z   key: Linux-cargo-5f4ca54de62896f8f86d6e7bc962a01666b9db632467059c92839163a6a88d16
+2026-08-21T23:43:09.1483088Z   restore-keys: Linux-cargo-
+
+2026-08-21T23:43:09.1483357Z   enableCrossOsArchive: false
+2026-08-21T23:43:09.1483635Z   fail-on-cache-miss: false
+2026-08-21T23:43:09.1483874Z   lookup-only: false
+2026-08-21T23:43:09.1484097Z   save-always: false
+2026-08-21T23:43:09.1484297Z env:
+2026-08-21T23:43:09.1484495Z   CARGO_HOME: /home/runner/.cargo
+2026-08-21T23:43:09.1484748Z   CARGO_INCREMENTAL: 0
+2026-08-21T23:43:09.1485017Z   CARGO_TERM_COLOR: always
+2026-08-21T23:43:09.1485243Z ##[endgroup]
+2026-08-21T23:43:09.2519923Z (node:2307) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-08-21T23:43:09.2521013Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-08-21T23:43:09.3335344Z Cache hit for: Linux-cargo-5f4ca54de62896f8f86d6e7bc962a01666b9db632467059c92839163a6a88d16
+2026-08-21T23:43:09.3498077Z (node:2307) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-08-21T23:43:10.3739076Z Received 180355072 of 760494208 (23.7%), 172.0 MBs/sec
+2026-08-21T23:43:11.3740828Z Received 373293056 of 760494208 (49.1%), 178.0 MBs/sec
+2026-08-21T23:43:12.3870550Z Received 562036736 of 760494208 (73.9%), 178.6 MBs/sec
+2026-08-21T23:43:13.3061634Z Received 760494208 of 760494208 (100.0%), 184.5 MBs/sec
+2026-08-21T23:43:13.3064881Z Cache Size: ~725 MB (760494208 B)
+2026-08-21T23:43:13.3178985Z [command]/usr/bin/tar -xf /home/runner/work/_temp/ae2150d9-7a60-4701-bb9c-1d58bd069685/cache.tzst -P -C /home/runner/work/HyX/HyX --use-compress-program unzstd
+2026-08-21T23:43:19.1041418Z Cache restored successfully
+2026-08-21T23:43:19.1491168Z Cache restored from key: Linux-cargo-5f4ca54de62896f8f86d6e7bc962a01666b9db632467059c92839163a6a88d16
