@@ -117,6 +117,52 @@ jobs:
             ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-release.apk
 
   # ─────────────────────────────────────────────────────────────
+  # Android APK 轻量版（Kotlin + Rust JNI，无 Flutter 引擎，arm64）
+  # ─────────────────────────────────────────────────────────────
+  build_apk_lite:
+    needs: build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-linux-android
+
+      - name: 安装 cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: 配置 Android NDK
+        uses: nttod/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: v27
+
+      - name: 设置 NDK 路径
+        run: echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+
+      - name: 构建 APK 轻量版
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: 上传 APK 轻量版
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-lite-result
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
   # Linux x86_64 tar.gz（ubuntu-22.04）
   # ─────────────────────────────────────────────────────────────
   build_tar_x86_64:
@@ -634,12 +680,11 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
 
-      - name: 安装 Rust（macOS targets）
+      - name: 安装 Rust（macOS arm64 target）
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: |
             aarch64-apple-darwin
-            x86_64-apple-darwin
 
       - name: 检查 rust-toolchain.toml
         working-directory: packages/hyx_isolates
@@ -804,6 +849,7 @@ jobs:
     needs:
       - build
       - build_apk
+      - build_apk_lite
       - build_tar_x86_64
       - build_tar_arm_64
       - build_deb_x86_64
@@ -831,8 +877,10 @@ jobs:
         run: |
           VERSION=${{ needs.build.outputs.version }}
           mkdir -p release-assets
-          # APK（arm64）
+          # APK（arm64，Flutter 版）
           cp all-artifacts/apk-result/app-release.apk    "release-assets/HyX-$VERSION-android-arm64v8.apk" 2>/dev/null || true
+          # APK 轻量版（arm64，Kotlin + Rust JNI，无 Flutter 引擎）
+          cp all-artifacts/apk-lite-result/app-release.apk "release-assets/HyX-$VERSION-android-arm64v8-lite.apk" 2>/dev/null || true
           # Linux tar.gz
           cp all-artifacts/tar-gz-x86-64-result/*.tar.gz "release-assets/HyX-$VERSION-linux-x86-64.tar.gz" 2>/dev/null || true
           cp all-artifacts/tar-gz-arm-64-result/*.tar.gz "release-assets/HyX-$VERSION-linux-arm-64.tar.gz" 2>/dev/null || true
@@ -882,6 +930,7 @@ jobs:
             | 平台 | 文件 |
             |------|------|
             | Android (arm64) | `HyX-${{ needs.build.outputs.version }}-android-arm64v8.apk` |
+            | Android (arm64) 轻量版 | `HyX-${{ needs.build.outputs.version }}-android-arm64v8-lite.apk` |
             | Linux x86_64    | `HyX-${{ needs.build.outputs.version }}-linux-x86-64.tar.gz` |
             | Linux arm64     | `HyX-${{ needs.build.outputs.version }}-linux-arm-64.tar.gz` |
             | Linux deb x86_64| `HyX-${{ needs.build.outputs.version }}-linux-x86-64.deb` |
@@ -911,6 +960,7 @@ jobs:
             "body": "HyX v${VERSION}",
             "files": {
               "android-arm64v8": "HyX-${VERSION}-android-arm64v8.apk",
+              "android-arm64v8-lite": "HyX-${VERSION}-android-arm64v8-lite.apk",
               "linux-x86-64-tar": "HyX-${VERSION}-linux-x86-64.tar.gz",
               "linux-arm-64-tar": "HyX-${VERSION}-linux-arm-64.tar.gz",
               "linux-x86-64-deb": "HyX-${VERSION}-linux-x86-64.deb",
