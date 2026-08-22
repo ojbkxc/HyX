@@ -1,0 +1,60 @@
+name: Flutter
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  flutter:
+    name: Flutter — FRB bridge over hyx-core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Setup Rust (+ Android target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-linux-android
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            flutter_app/rust/target
+          key: ${{ runner.os }}-flutter-cargo-${{ hashFiles('flutter_app/rust/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-cargo-
+
+      - name: Install flutter_rust_bridge_codegen 2.12.0
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: Generate FRB bindings (Rust → Dart)
+        working-directory: flutter_app
+        run: flutter_rust_bridge_codegen generate
+
+      - name: Fetch Dart dependencies
+        working-directory: flutter_app
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        working-directory: flutter_app
+        run: flutter analyze
+
+      - name: Rust check (host)
+        run: cargo check --manifest-path flutter_app/rust/Cargo.toml -p hyx_frb
+
+      - name: Rust test (host)
+        run: cargo test --manifest-path flutter_app/rust/Cargo.toml -p hyx_frb
+
+      - name: Rust check (Android arm64 target)
+        run: cargo check --target aarch64-linux-android --manifest-path flutter_app/rust/Cargo.toml -p hyx_frb

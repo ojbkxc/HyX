@@ -1,0 +1,38 @@
+# HyX — Flutter/Rust bridge crate.
+#
+# Standalone workspace so the root HyX Cargo workspace keeps its own lockfile /
+# lint targets; the empty [workspace] also prevents cargo from treating this
+# crate as a (non-member) path under the parent workspace root.
+[workspace]
+
+[package]
+name = "hyx_frb"
+version = "0.1.0"
+edition = "2021"
+authors = ["ojbkxc"]
+description = "FRB (flutter_rust_bridge) boundary reusing hyx-core for the HyX Flutter client."
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+hyx-core = { path = "../../core" }
+
+# FRB runtime — every part pinned to 2.12.0 so the generated code exactly
+# matches the codegen binary (flutter_rust_bridge_codegen 2.12.0) and the
+# Dart package (flutter_rust_bridge 2.12.0).
+flutter_rust_bridge = "=2.12.0"
+
+tokio = { version = "1.40", features = ["full"] }
+tracing = "0.1"
+
+# Bring the enhanced quinn-proto (BBR v2) into this crate's resolution, so the
+# Flutter client inherits BBR v2 as the default congestion control — same as the
+# root HyX workspace.
+[patch.crates-io]
+quinn-proto = { path = "../../vendor/quinn-proto" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(frb_expand)"] }

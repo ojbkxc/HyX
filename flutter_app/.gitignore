@@ -1,0 +1,17 @@
+# Dart / Flutter build outputs
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.packages
+pubspec.lock
+
+# Rust — generated via `flutter_rust_bridge_codegen generate` in CI
+rust/target/
+rust/Cargo.lock
+
+# FRB generated glue (regenerated on every CI run)
+lib/src/rust/
+rust/src/frb_generated.rs
+rust/build.rs
