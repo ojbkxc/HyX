@@ -324,7 +324,7 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'loca
             .await
             .ok(),
         );
-        if let Some(d) = &discovery {
+        if let Some(d) = discovery.as_ref() {
             if let Err(e) = d.start().await {
                 tracing::warn!("discovery start failed: {e}");
             }
@@ -333,7 +333,7 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'loca
         let mut session = match P2PSession::accept(bind_addr(port), identity(), device_id()).await {
             Ok(s) => s,
             Err(e) => {
-                if let Some(d) = &discovery {
+                if let Some(d) = discovery.as_ref() {
                     d.stop();
                 }
                 let _ = tx.send(Evt::Done(Err(e.to_string())));
@@ -341,7 +341,7 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'loca
             }
         };
         let res = receive_into(&mut session, &dir, tx.clone()).await;
-        if let Some(d) = &discovery {
+        if let Some(d) = discovery.as_ref() {
             d.stop();
         }
         let _ = tx.send(Evt::Done(res));
