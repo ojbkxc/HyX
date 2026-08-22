@@ -256,6 +256,62 @@ jobs:
           path: ${{ steps.find_deb.outputs.deb_path }}
 
   # ─────────────────────────────────────────────────────────────
+  # Linux arm64 deb 包（ubuntu-22.04-arm）
+  # ─────────────────────────────────────────────────────────────
+  build_deb_arm_64:
+    needs: build
+    runs-on: ubuntu-22.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev
+
+      # Flutter 不提供 Linux ARM64 预编译二进制，从 GitHub 克隆 SDK
+      - name: 安装 Flutter SDK
+        run: |
+          git clone --depth 1 --branch ${{ env.FLUTTER_VERSION }} https://github.com/flutter/flutter.git $HOME/flutter
+          echo "$HOME/flutter/bin" >> $GITHUB_PATH
+          $HOME/flutter/bin/flutter --version
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 检查 rust-toolchain.toml
+        working-directory: packages/hyx_isolates
+        run: rustup show
+
+      - name: 启用 flutter_distributor
+        run: dart pub global activate flutter_distributor
+
+      - name: 构建 deb 包
+        working-directory: app
+        run: PATH="$PATH:$HOME/.pub-cache/bin" flutter_distributor package --platform linux --targets deb
+
+      - name: 查找 deb 文件
+        id: find_deb
+        run: |
+          VERSION=${{ needs.build.outputs.version }}
+          DEB_PATH=$(find app/dist -name "hyx_app-$VERSION*-linux.deb" -o -name "hyx_app-*.deb" | head -1)
+          echo "deb_path=$DEB_PATH" >> $GITHUB_OUTPUT
+
+      - name: 检查 deb 文件是否存在
+        run: |
+          if [[ ! -f "${{ steps.find_deb.outputs.deb_path }}" ]]; then
+            echo "未找到文件: ${{ steps.find_deb.outputs.deb_path }}"
+            exit 1
+          fi
+
+      - name: 上传 deb 文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-arm-64-result
+          path: ${{ steps.find_deb.outputs.deb_path }}
+
+  # ─────────────────────────────────────────────────────────────
   # AppImage（ubuntu-22.04）
   # ─────────────────────────────────────────────────────────────
   build_appimage_x86_64:
@@ -370,6 +426,141 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
+  # Windows arm64 zip（windows-11-arm）
+  # ─────────────────────────────────────────────────────────────
+  build_windows_zip_arm_64:
+    needs: build
+    runs-on: windows-11-arm
+
+    # Windows ARM64 需要 beta：stable (3.41.9) 没有 windows-arm64 产物，会静默回退到 x64 构建
+    # 等 windows-arm64 进入 stable 后切回共享的 stable FLUTTER_VERSION
+    env:
+      FLUTTER_VERSION: "3.47.0-0.4.pre"
+
+    steps:
+      - name: 修复长路径问题
+        run: git config --system core.longpaths true
+
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      # Flutter 不提供 Windows ARM64 预编译二进制，从 GitHub 克隆 SDK
+      - name: 安装 Flutter SDK
+        run: |
+          git clone --depth 1 --branch ${{ env.FLUTTER_VERSION }} https://github.com/flutter/flutter.git $env:USERPROFILE\flutter
+          Add-Content $env:GITHUB_PATH "$env:USERPROFILE\flutter\bin"
+          & "$env:USERPROFILE\flutter\bin\flutter.bat" --version
+
+      # Flutter 在缺少 arm64 产物时会静默回退到 x64 Dart SDK，这会产出 x64 构建
+      - name: 验证原生 arm64 工具链
+        run: |
+          $dartVersion = & "$env:USERPROFILE\flutter\bin\dart.bat" --version 2>&1 | Out-String
+          Write-Host $dartVersion
+          if ($dartVersion -notmatch 'windows_arm64') {
+            Write-Error "Dart SDK 不是 windows_arm64 - Flutter 回退到了 x64"
+            exit 1
+          }
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 检查 rust-toolchain.toml
+        working-directory: packages/hyx_isolates
+        run: rustup show
+
+      - name: 依赖
+        working-directory: app
+        run: flutter pub get
+
+      - name: 编译 Windows
+        working-directory: app
+        run: flutter build windows --release
+
+      - name: 创建空 settings.json
+        working-directory: app
+        run: echo {} > build/windows/arm64/runner/Release/settings.json
+
+      - name: 添加 DLL 文件
+        working-directory: app
+        run: |
+          $crt = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\arm64\Microsoft.VC143.CRT' | Select-Object -Last 1
+          Copy-Item "$($crt.FullName)\msvcp140.dll" build/windows/arm64/runner/Release/
+          Copy-Item "$($crt.FullName)\vcruntime140.dll" build/windows/arm64/runner/Release/
+          Copy-Item "$($crt.FullName)\vcruntime140_1.dll" build/windows/arm64/runner/Release/
+
+      - name: 打包 zip
+        working-directory: app
+        run: Compress-Archive -Path build/windows/arm64/runner/Release/* -DestinationPath "HyX-${{ needs.build.outputs.version }}-windows-arm-64.zip"
+
+      - name: 上传 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip-arm-64-result
+          path: app/HyX-${{ needs.build.outputs.version }}-windows-arm-64.zip
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
+  # Windows x86_64 exe 安装包（Inno Setup，windows-latest）
+  # ─────────────────────────────────────────────────────────────
+  build_windows_exe_x86_64:
+    needs: build
+    runs-on: windows-latest
+
+    steps:
+      - name: 修复长路径问题
+        run: git config --system core.longpaths true
+
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 检查 rust-toolchain.toml
+        working-directory: packages/hyx_isolates
+        run: rustup show
+
+      - name: 依赖
+        working-directory: app
+        run: flutter pub get
+
+      - name: 编译 Windows
+        working-directory: app
+        run: flutter build windows --release
+
+      - name: 创建空 settings.json
+        working-directory: app
+        run: echo {} > build/windows/x64/runner/Release/settings.json
+
+      - name: 安装 Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: 准备 Inno Setup 载荷
+        run: |
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\inno" | Out-Null
+          Copy-Item -Path "app\build\windows\x64\runner\Release\*" -Destination "${{ runner.temp }}\inno" -Recurse
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\inno-result" | Out-Null
+
+      - name: 编译安装包
+        run: iscc "/DPayloadDir=${{ runner.temp }}\inno" "/DResultDir=${{ runner.temp }}\inno-result" "/DMyAppVersion=${{ needs.build.outputs.version }}" support\scripts\compile_windows_exe-inno.iss
+
+      - name: 重命名安装包
+        run: Rename-Item -Path "${{ runner.temp }}\inno-result\HyX.exe" -NewName "HyX-${{ needs.build.outputs.version }}-windows-x86-64.exe"
+
+      - name: 上传 exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe-x86-64-result
+          path: ${{ runner.temp }}\inno-result\HyX-${{ needs.build.outputs.version }}-windows-x86-64.exe
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
   # macOS zip（macos-latest，universal binary）
   # ─────────────────────────────────────────────────────────────
   build_macos:
@@ -457,6 +648,76 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
+  # Linux CLI（x86_64 + arm64，matrix）
+  # ─────────────────────────────────────────────────────────────
+  build_cli_linux:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            suffix: linux-x86-64
+          - runner: ubuntu-22.04-arm
+            suffix: linux-arm-64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 编译 CLI
+        run: cargo build --release --package hyx-cli
+
+      # tar 保留可执行位，直接上传 artifact 会丢失该位
+      - name: 创建 tar.gz 归档
+        run: tar -czvf HyX-CLI-${{ needs.build.outputs.version }}-${{ matrix.suffix }}.tar.gz -C target/release hyx-cli
+
+      - name: 上传 CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.suffix }}-result
+          path: HyX-CLI-${{ needs.build.outputs.version }}-${{ matrix.suffix }}.tar.gz
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
+  # Windows CLI exe（x86_64 + arm64，matrix）
+  # ─────────────────────────────────────────────────────────────
+  build_cli_windows_exe:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            suffix: x86-64
+          - runner: windows-11-arm
+            suffix: arm-64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 编译 CLI
+        run: cargo build --release --package hyx-cli
+
+      - name: 重命名 CLI 可执行文件
+        run: Rename-Item -Path "target\release\hyx-cli.exe" -NewName "HyX-CLI-${{ needs.build.outputs.version }}-windows-${{ matrix.suffix }}.exe"
+
+      - name: 上传 CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cli-exe-${{ matrix.suffix }}-result
+          path: target\release\HyX-CLI-${{ needs.build.outputs.version }}-windows-${{ matrix.suffix }}.exe
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
   # 汇总所有 artifact，创建 GitHub Release
   # ─────────────────────────────────────────────────────────────
   release:
@@ -466,10 +727,15 @@ jobs:
       - build_tar_x86_64
       - build_tar_arm_64
       - build_deb_x86_64
+      - build_deb_arm_64
       - build_appimage_x86_64
       - build_windows_zip_x86_64
+      - build_windows_zip_arm_64
+      - build_windows_exe_x86_64
       - build_macos
       - build_ios_no_sign
+      - build_cli_linux
+      - build_cli_windows_exe
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -495,16 +761,26 @@ jobs:
           cp all-artifacts/tar-gz-arm-64-result/*.tar.gz "release-assets/HyX-$VERSION-linux-arm-64.tar.gz" 2>/dev/null || true
           # Linux deb
           cp all-artifacts/deb-x86-64-result/*.deb "release-assets/HyX-$VERSION-linux-x86-64.deb" 2>/dev/null || true
+          cp all-artifacts/deb-arm-64-result/*.deb "release-assets/HyX-$VERSION-linux-arm-64.deb" 2>/dev/null || true
           # AppImage
           for file in all-artifacts/appimage-x86-64-result/*.AppImage; do
             if [ -f "$file" ]; then
               cp "$file" "release-assets/HyX-$VERSION-linux-x86-64.AppImage"
             fi
           done
-          # Windows zip
+          # Windows zip（便携版）
           cp all-artifacts/windows-zip-x86-64-result/*.zip "release-assets/HyX-$VERSION-windows-x86-64.zip" 2>/dev/null || true
+          cp all-artifacts/windows-zip-arm-64-result/*.zip "release-assets/HyX-$VERSION-windows-arm-64.zip" 2>/dev/null || true
+          # Windows exe 安装包
+          cp all-artifacts/windows-exe-x86-64-result/*.exe "release-assets/HyX-$VERSION-windows-x86-64.exe" 2>/dev/null || true
           # macOS zip
           cp all-artifacts/macos-zip-result/*.zip "release-assets/HyX-$VERSION-macos.zip" 2>/dev/null || true
+          # CLI - Linux tar.gz
+          cp all-artifacts/cli-linux-x86-64-result/*.tar.gz "release-assets/HyX-CLI-$VERSION-linux-x86-64.tar.gz" 2>/dev/null || true
+          cp all-artifacts/cli-linux-arm-64-result/*.tar.gz "release-assets/HyX-CLI-$VERSION-linux-arm-64.tar.gz" 2>/dev/null || true
+          # CLI - Windows exe
+          cp all-artifacts/windows-cli-exe-x86-64-result/*.exe "release-assets/HyX-CLI-$VERSION-windows-x86-64.exe" 2>/dev/null || true
+          cp all-artifacts/windows-cli-exe-arm-64-result/*.exe "release-assets/HyX-CLI-$VERSION-windows-arm-64.exe" 2>/dev/null || true
           # 列出最终发布文件
           ls -l release-assets/
 
@@ -535,10 +811,17 @@ jobs:
             | Android (x64)   | `HyX-${{ needs.build.outputs.version }}-android-x64.apk` |
             | Linux x86_64    | `HyX-${{ needs.build.outputs.version }}-linux-x86-64.tar.gz` |
             | Linux arm64     | `HyX-${{ needs.build.outputs.version }}-linux-arm-64.tar.gz` |
-            | Linux deb       | `HyX-${{ needs.build.outputs.version }}-linux-x86-64.deb` |
+            | Linux deb x86_64| `HyX-${{ needs.build.outputs.version }}-linux-x86-64.deb` |
+            | Linux deb arm64 | `HyX-${{ needs.build.outputs.version }}-linux-arm-64.deb` |
             | Linux AppImage  | `HyX-${{ needs.build.outputs.version }}-linux-x86-64.AppImage` |
-            | Windows x86_64  | `HyX-${{ needs.build.outputs.version }}-windows-x86-64.zip` |
+            | Windows x86_64 安装包 | `HyX-${{ needs.build.outputs.version }}-windows-x86-64.exe` |
+            | Windows x86_64 便携版 | `HyX-${{ needs.build.outputs.version }}-windows-x86-64.zip` |
+            | Windows arm64 便携版 | `HyX-${{ needs.build.outputs.version }}-windows-arm-64.zip` |
             | macOS           | `HyX-${{ needs.build.outputs.version }}-macos.zip` |
+            | CLI Linux x86_64 | `HyX-CLI-${{ needs.build.outputs.version }}-linux-x86-64.tar.gz` |
+            | CLI Linux arm64  | `HyX-CLI-${{ needs.build.outputs.version }}-linux-arm-64.tar.gz` |
+            | CLI Windows x86_64 | `HyX-CLI-${{ needs.build.outputs.version }}-windows-x86-64.exe` |
+            | CLI Windows arm64 | `HyX-CLI-${{ needs.build.outputs.version }}-windows-arm-64.exe` |
 
             ### 特性
             - Rust 内核：QUIC 单连续流 + 断点续传 + 增量 SHA-256
