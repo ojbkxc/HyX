@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge.dart' show RustStreamSink;
-import 'package:hyx_isolates/rust/api/transfer.dart' as rust_transfer;
 import 'package:hyx_isolates/rust/api/model.dart' as model;
+import 'package:hyx_isolates/rust/api/transfer.dart' as rust_transfer;
 import 'package:logging/logging.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:refena_flutter/refena_flutter.dart';

@@ -89,6 +89,13 @@ jobs:
         working-directory: ${{ env.APK_BUILD_DIR }}/app
         run: flutter pub get
 
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: ${{ env.APK_BUILD_DIR }}/packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
+
       - name: 构建 APK（split-per-abi）
         working-directory: ${{ env.APK_BUILD_DIR }}/app
         run: flutter build apk --split-per-abi --release
@@ -133,6 +140,13 @@ jobs:
       - name: 依赖
         working-directory: app
         run: flutter pub get
+
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
 
       - name: 编译 Linux
         working-directory: app
@@ -182,6 +196,13 @@ jobs:
         working-directory: app
         run: flutter pub get
 
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
+
       - name: 编译 Linux
         working-directory: app
         run: flutter build linux --release
@@ -230,6 +251,13 @@ jobs:
 
       - name: 更新 PATH
         run: echo 'export PATH="$PATH:$HOME/.pub-cache/bin"' >> ~/.bashrc
+
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
 
       - name: 构建 deb 包
         working-directory: app
@@ -287,6 +315,13 @@ jobs:
       - name: 启用 flutter_distributor
         run: dart pub global activate flutter_distributor
 
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
+
       - name: 构建 deb 包
         working-directory: app
         run: PATH="$PATH:$HOME/.pub-cache/bin" flutter_distributor package --platform linux --targets deb
@@ -342,6 +377,13 @@ jobs:
       - name: 依赖
         working-directory: app
         run: flutter pub get
+
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
 
       - name: 编译 Linux
         working-directory: app
@@ -405,6 +447,13 @@ jobs:
       - name: 依赖
         working-directory: app
         run: flutter pub get
+
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
 
       - name: 编译 Windows
         working-directory: app
@@ -472,6 +521,13 @@ jobs:
         working-directory: app
         run: flutter pub get
 
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
+
       - name: 编译 Windows
         working-directory: app
         run: flutter build windows --release
@@ -529,6 +585,13 @@ jobs:
       - name: 依赖
         working-directory: app
         run: flutter pub get
+
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
 
       - name: 编译 Windows
         working-directory: app
@@ -591,6 +654,13 @@ jobs:
         working-directory: app
         run: flutter pub get
 
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
+
       - name: 编译 macOS
         working-directory: app
         run: flutter build macos --release
@@ -635,6 +705,13 @@ jobs:
       - name: 依赖
         working-directory: app
         run: flutter pub get
+
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
 
       - name: 编译 iOS（无签名）
         working-directory: app

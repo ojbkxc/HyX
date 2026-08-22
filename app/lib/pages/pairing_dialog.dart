@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
 import 'package:hyx_app/gen/strings.g.dart';
 import 'package:hyx_app/pages/transfer_progress_sheet.dart';
 import 'package:hyx_app/provider/transfer_provider.dart';

@@ -76,7 +76,6 @@ fn config_from(chunk_bytes: i32, compression: i32) -> ConfigMessage {
     c
 }
 
-
 /// 构造一个节流到 ~5 Hz 的 `ProgressCallback`，将字节进度通过 `StreamSink` 推送到 Dart。
 ///
 /// 对应 mobile `progress_sink`：滑动窗口速率，避免每个 chunk 都回调淹没 UI。
@@ -193,7 +192,6 @@ pub fn start_listener(
 ) -> Result<()> {
     use hyx_core::discovery::DiscoveryManager;
 
-
     let port_u16 = if port > 0 { port as u16 } else { hyx_core::DEFAULT_TRANSFER_PORT };
     let _ = config_from(chunk_bytes, compression);
     let dir = save_dir.clone();
@@ -218,7 +216,13 @@ pub fn start_listener(
             }
         }
 
-        let mut session = match P2PSession::accept(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port_u16), identity(), current_device_id()).await {
+        let mut session = match P2PSession::accept(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port_u16),
+            identity(),
+            current_device_id(),
+        )
+        .await
+        {
             Ok(s) => s,
             Err(e) => {
                 if let Some(d) = discovery.as_ref() {
@@ -276,7 +280,9 @@ pub fn connect(
                     return;
                 }
             };
-            match P2PSession::discover_peer(port_u16, &identity(), current_device_id(), Some(target)).await {
+            match P2PSession::discover_peer(port_u16, &identity(), current_device_id(), Some(target))
+                .await
+            {
                 Ok(pair) => pair,
                 Err(e) => {
                     emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
@@ -292,7 +298,9 @@ pub fn connect(
                 }
             }
         };
-        let mut session = match P2PSession::connect(addr, fp, identity(), current_device_id(), cfg).await {
+        let mut session = match P2PSession::connect(addr, fp, identity(), current_device_id(), cfg)
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
@@ -356,7 +364,16 @@ pub fn pair_rendezvous(
                 return;
             }
         };
-        let mut session = match P2PSession::from_rendezvous(rv, code_o, identity(), current_device_id(), cfg, false).await {
+        let mut session = match P2PSession::from_rendezvous(
+            rv,
+            code_o,
+            identity(),
+            current_device_id(),
+            cfg,
+            false,
+        )
+        .await
+        {
             Ok(s) => s,
             Err(e) => {
                 emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));
@@ -420,7 +437,16 @@ pub fn pair_send(
                 return;
             }
         };
-        let mut session = match P2PSession::from_rendezvous(rv, code_o, identity(), current_device_id(), cfg, false).await {
+        let mut session = match P2PSession::from_rendezvous(
+            rv,
+            code_o,
+            identity(),
+            current_device_id(),
+            cfg,
+            false,
+        )
+        .await
+        {
             Ok(s) => s,
             Err(e) => {
                 emit_final(&sink_clone, RsTransferStatus::Failed, Some(e.to_string()));

@@ -1,4 +1,3 @@
-
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
@@ -155,7 +154,6 @@ class _HomePageState extends State<HomePage> with Refena {
 
   /// 主内容：设备列表或空状态。
   Widget _buildBody(BuildContext context, DeviceState devState) {
-    final scheme = Theme.of(context).colorScheme;
     final peers = devState.peers;
 
     if (peers.isEmpty) {

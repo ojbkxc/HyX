@@ -153,7 +153,9 @@ class _HistoryCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${formatBytes(record.bytesTransferred)} · ${record.peerAddress} · ${formatDuration(Duration(milliseconds: record.durationMillis))}',
+                    '${formatBytes(record.bytesTransferred)} · '
+                    '${record.peerAddress} · '
+                    '${formatDuration(Duration(milliseconds: record.durationMillis))}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
