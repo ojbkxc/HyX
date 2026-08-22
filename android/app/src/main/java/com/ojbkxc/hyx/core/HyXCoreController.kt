@@ -2,6 +2,7 @@ package com.ojbkxc.hyx.core
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -68,6 +69,9 @@ class HyXCoreController : ViewModel() {
 
     init {
         loadSeedHistory()
+        // Restore persisted devices (historical) before scanning so the 设备
+        // tab shows both sections from the first frame.
+        _devices.value = loadStoredDevices()
         startDiscovery()
     }
 
@@ -162,6 +166,9 @@ class HyXCoreController : ViewModel() {
         const val RENDEZVOUS_PORT = 14567
         const val PAIR_CODE_LEN = 6
         const val PAIR_CODE_TTL_MS = 300_000L
+
+        private const val DEV_STORE = "hyx_device_store"
+        private const val DEV_KEY = "devices"
     }
 
     fun onDirectionChange(d: TransferDirection) {
@@ -238,26 +245,100 @@ class HyXCoreController : ViewModel() {
         _devicesScanning.value = true
         viewModelScope.launch(Dispatchers.IO) {
             val raw = if (HyXNative.isLoaded) HyXNative.hyxDiscover(14567) else null
-            val found = raw.orEmpty()
+            val nowOnline = raw.orEmpty()
                 .lineSequence()
                 .filter { it.isNotBlank() }
-                .mapNotNull { line ->
-                    val tab = line.indexOf('\t')
-                    if (tab < 0) return@mapNotNull null
-                    val name = line.substring(0, tab)
-                    val addr = line.substring(tab + 1)
-                    Device(
-                        id = addr,
-                        name = name,
-                        address = addr,
-                        via = Device.Via.Lan,
-                        connected = false
-                    )
-                }
+                .mapNotNull { parsePeerLine(it) }
                 .toList()
-            _devices.value = found
+            mergeDevices(nowOnline)
             _devicesScanning.value = false
         }
+    }
+
+    /** Parse one `name\tip:port\tdevice_id` discovery line into a [Device]. */
+    private fun parsePeerLine(line: String): Device? {
+        val parts = line.split('\t')
+        if (parts.size < 3) return null
+        val id = parts[2]
+        if (id.isBlank()) return null
+        return Device(
+            id = id,
+            name = parts[0],
+            address = parts[1],
+            via = Device.Via.Lan,
+            online = true,
+            allowTransfer = storedAllowTransfer(id)
+        )
+    }
+
+    /** Online devices merge into the persisted list; peers not seen this scan
+     *  drop out of 在线设备 and surface as 历史设备 (kept for deletion/拒收). */
+    private fun mergeDevices(currentOnline: List<Device>) {
+        val onlineIds = currentOnline.map { it.id }.toSet()
+        val history = _devices.value
+            .filter { !onlineIds.contains(it.id) }
+            .map { it.copy(online = false) }
+
+        val foldedOnline = currentOnline.map { od ->
+            val known = (_devices.value + history).firstOrNull { it.id == od.id }
+            if (known != null) od.copy(allowTransfer = known.allowTransfer) else od
+        }
+        _devices.value = foldedOnline + history
+        persistDevices(_devices.value)
+    }
+
+    /** Flip the 接收/禁止 toggle for a device and persist the choice. */
+    fun toggleAllowTransfer(id: String) {
+        _devices.value = _devices.value.map {
+            if (it.id == id) it.copy(allowTransfer = !it.allowTransfer) else it
+        }
+        persistDevices(_devices.value)
+    }
+
+    /** Forget a historical device (removes it from storage and the list). */
+    fun removeHistoryDevice(id: String) {
+        _devices.value = _devices.value.filterNot { it.id == id }
+        persistDevices(_devices.value)
+    }
+
+    // ---------------------------------------------------------------------
+    // Device persistence — known peers + their 接收/禁止 choice survive restarts.
+    // The store is a single SharedPreferences string of newline-separated
+    // "id\tname\taddress\tallow(1/0)" entries. Absent prefs (no appContext
+    // yet) degrade to in-memory only.
+    // ---------------------------------------------------------------------
+
+    private fun devicePrefs(): SharedPreferences? =
+        HyXNative.appContext?.getSharedPreferences(DEV_STORE, Context.MODE_PRIVATE)
+
+    private fun loadStoredDevices(): List<Device> =
+        devicePrefs()?.getString(DEV_KEY, null)
+            ?.lineSequence()
+            ?.mapNotNull { l ->
+                val p = l.split('\t')
+                if (p.size < 4) return@mapNotNull null
+                Device(
+                    id = p[0],
+                    name = p[1],
+                    address = p[2].ifEmpty { null },
+                    via = Device.Via.Lan,
+                    online = false,
+                    allowTransfer = p[3] == "1"
+                )
+            }
+            ?.toList()
+            ?: emptyList()
+
+    private fun storedAllowTransfer(id: String): Boolean {
+        val entry = loadStoredDevices().firstOrNull { it.id == id } ?: return true
+        return entry.allowTransfer
+    }
+
+    private fun persistDevices(devices: List<Device>) {
+        val raw = devices.joinToString("\n") {
+            "${it.id}\t${it.name}\t${it.address.orEmpty()}\t${if (it.allowTransfer) "1" else "0"}"
+        }
+        devicePrefs()?.edit()?.putString(DEV_KEY, raw)?.apply()
     }
 
     /**
@@ -311,13 +392,6 @@ class HyXCoreController : ViewModel() {
         f.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
         true
     }.getOrDefault(false)
-
-    fun pingPeer(id: String) {
-        // Toggle the "connected" marker so the 设备 tab reflects reachability.
-        _devices.value = _devices.value.map {
-            if (it.id == id) it.copy(connected = !it.connected) else it
-        }
-    }
 
     private fun nudgeStatusToTransferring() {
         viewModelScope.launch {

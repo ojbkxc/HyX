@@ -188,9 +188,11 @@ async fn send_path(
 }
 
 /// Real LAN UDP-beacon discovery: broadcast + listen for ~2.5 s, then return
-/// one line per peer as `"name\tip:port"` (empty string if none found). The
-/// 设备 tab renders these lines into [Device] cards. No `JNIEnv` crosses any
-/// `await` point — the whole scan is awaited via `runtime().block_on`.
+/// one line per peer as `"name\tip:port\tdevice_id"` (empty string if none
+/// found). The 设备 tab renders these lines into [Device] cards, keyed by the
+/// stable `device_id` so the same phone seen on different subnets dedupes.
+/// No `JNIEnv` crosses any `await` point — the whole scan is awaited via
+/// `runtime().block_on`.
 async fn discover_peers(port: u16) -> String {
     let name = format!("hyx-{}", &device_id().to_string()[..6]);
     let manager = match DiscoveryManager::new(
@@ -217,7 +219,7 @@ async fn discover_peers(port: u16) -> String {
     manager.stop();
     peers
         .into_iter()
-        .map(|p| format!("{}\t{}", p.device_name, p.socket_addr()))
+        .map(|p| format!("{}\t{}\t{}", p.device_name, p.socket_addr(), p.device_id))
         .collect::<Vec<_>>()
         .join("\n")
 }

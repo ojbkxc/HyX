@@ -1,6 +1,8 @@
 package com.ojbkxc.hyx.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,11 +17,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeviceHub
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -27,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -42,13 +48,16 @@ fun DevicesScreen(controller: HyXCoreController) {
     val devices by controller.devices.collectAsState()
     val scanning by controller.devicesScanning.collectAsState()
 
+    val online = devices.filter { it.online }
+    val history = devices.filter { !it.online }
+
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
             stringResource(R.string.tab_devices_title),
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (scanning) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -61,22 +70,32 @@ fun DevicesScreen(controller: HyXCoreController) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
 
-        if (devices.isEmpty()) {
-            Column(
-                Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Outlined.DeviceHub, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(12.dp))
-                Text(stringResource(R.string.no_devices), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item(key = "online_header") { SectionHeader(stringResource(R.string.online_devices), online.size) }
+            if (online.isEmpty()) {
+                item(key = "online_empty") {
+                    EmptyRow(stringResource(R.string.no_online_devices))
+                }
+            } else {
+                items(online, key = { it.id }) { device ->
+                    OnlineDeviceCard(device, onToggle = { controller.toggleAllowTransfer(device.id) })
+                }
             }
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(devices, key = { it.id }) { device ->
-                    DeviceCard(device, onClick = { controller.pingPeer(device.id) })
+
+            item(key = "history_header") { SectionHeader(stringResource(R.string.history_devices), history.size) }
+            if (history.isEmpty()) {
+                item(key = "history_empty") {
+                    EmptyRow(stringResource(R.string.no_history_devices))
+                }
+            } else {
+                items(history, key = { it.id }) { device ->
+                    HistoryDeviceCard(
+                        device,
+                        onToggle = { controller.toggleAllowTransfer(device.id) },
+                        onDelete = { controller.removeHistoryDevice(device.id) }
+                    )
                 }
             }
         }
@@ -84,33 +103,45 @@ fun DevicesScreen(controller: HyXCoreController) {
 }
 
 @Composable
-private fun DeviceCard(device: Device, onClick: () -> Unit) {
+private fun SectionHeader(title: String, count: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
+        Spacer(Modifier.size(8.dp))
+        Text(
+            stringResource(R.string.device_count, count),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun EmptyRow(text: String) {
+    Text(
+        text,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+        fontSize = 13.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun OnlineDeviceCard(device: Device, onToggle: () -> Unit) {
     Card(
-        onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            val tint = if (device.connected) HyxGreen else MaterialTheme.colorScheme.onSurfaceVariant
-            Column(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Outlined.DeviceHub, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-            }
+            Avatar(device, online = true)
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(device.name, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
-                    StatusBadge(
-                        text = stringResource(deviceViaLabelRes(device.via)),
-                        active = device.connected
-                    )
+                    StatusBadge(text = stringResource(deviceViaLabelRes(device.via)), active = true)
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -119,6 +150,98 @@ private fun DeviceCard(device: Device, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Spacer(Modifier.size(12.dp))
+            AllowToggle(device.allowTransfer, onToggle)
+        }
+    }
+}
+
+@Composable
+private fun HistoryDeviceCard(device: Device, onToggle: () -> Unit, onDelete: () -> Unit) {
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(Modifier.padding(start = 14.dp, top = 6.dp, bottom = 6.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Avatar(device, online = false)
+            Spacer(Modifier.size(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    device.name,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    color = dim,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    device.address ?: stringResource(R.string.connected_via_pair),
+                    fontSize = 12.sp,
+                    color = dim
+                )
+            }
+            Spacer(Modifier.size(8.dp))
+            AllowToggle(device.allowTransfer, onToggle)
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Outlined.Delete,
+                    contentDescription = stringResource(R.string.delete_device),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun Avatar(device: Device, online: Boolean) {
+    val tint = if (online) HyxGreen else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            Icons.Outlined.DeviceHub,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+/** Pill button toggling 接收 / 禁止 — only two states, taps switch. */
+@Composable
+private fun AllowToggle(allow: Boolean, onToggle: () -> Unit) {
+    val bg: Color
+    val fg: Color
+    val border: Color
+    val label: String
+    if (allow) {
+        label = stringResource(R.string.allow_transfer)
+        bg = HyxGreen
+        fg = Color.White
+        border = Color.Transparent
+    } else {
+        label = stringResource(R.string.block_transfer)
+        bg = MaterialTheme.colorScheme.errorContainer
+        fg = MaterialTheme.colorScheme.onErrorContainer
+        border = MaterialTheme.colorScheme.error
+    }
+    Surface(
+        onClick = onToggle,
+        shape = CircleShape,
+        color = bg,
+        border = BorderStroke(1.dp, border),
+        modifier = Modifier.height(32.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+            Text(label, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

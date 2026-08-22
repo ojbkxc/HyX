@@ -13,13 +13,20 @@ enum class TransferStatus { Idle, Pairing, Connecting, Transferring, Completed, 
 /** A short pairing code for rendezvous (cross-NAT). */
 data class PairingCode(val code: String, val expiresAtMs: Long)
 
-/** A peer reachable on the LAN (beacon discovery) or via rendezvous. */
+/**
+ * A peer reachable on the LAN (beacon discovery) or via rendezvous.
+ * @param id             stable per-device UUID carried in the discovery beacon;
+ *                       keys dedup — the same phone seen on different subnets is one entry.
+ * @param online         true when currently discovered on the LAN, false for a historical peer.
+ * @param allowTransfer  whether transfers from this device are accepted (接收/禁止).
+ */
 data class Device(
     val id: String,
     val name: String,
     val address: String?,
     val via: Via,
-    val connected: Boolean
+    val online: Boolean,
+    val allowTransfer: Boolean = true
 ) {
     enum class Via { Lan, Rendezvous }
 }

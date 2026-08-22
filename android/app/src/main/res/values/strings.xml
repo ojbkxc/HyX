@@ -73,6 +73,14 @@
     <string name="via_lan">局域网</string>
     <string name="via_rendezvous">配对码</string>
     <string name="connected_via_pair">经配对码连接</string>
+    <string name="online_devices">在线设备</string>
+    <string name="history_devices">历史设备</string>
+    <string name="device_count">%1$d 台</string>
+    <string name="no_online_devices">暂无在线设备</string>
+    <string name="no_history_devices">暂无历史设备</string>
+    <string name="allow_transfer">接收</string>
+    <string name="block_transfer">禁止</string>
+    <string name="delete_device">删除设备</string>
 
     <!-- History -->
     <string name="tab_history_title">传输历史</string>
