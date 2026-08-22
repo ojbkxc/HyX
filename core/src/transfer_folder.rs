@@ -1012,6 +1012,18 @@ mod tests {
             tokio::fs::write(src_dir.join(n), body).await.unwrap();
         }
 
+        // Pre-create file 0 in the receiver's output directory to simulate
+        // a real resume where the receiver already holds the completed file.
+        // Without this the receiver's skip-verification (completed_files check)
+        // fails with Error::Verification because the file is missing, which
+        // closes the connection before the sender sees Ready.
+        tokio::fs::create_dir_all(dst_dir.join("src"))
+            .await
+            .unwrap();
+        tokio::fs::write(dst_dir.join("src").join(names[0]), &bodies[0])
+            .await
+            .unwrap();
+
         let cfg = make_cfg(chunk_size as u32);
 
         let server_id = Arc::new(Identity::generate().unwrap());
