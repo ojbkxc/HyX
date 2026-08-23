@@ -262,7 +262,8 @@ class _HomePageState extends State<HomePage> with Refena {
     unawaited(context.redux(transferProvider).dispatchAsync(
       StartSendAction(
         peerAddress: device.addr,
-        peerFingerprint: device.certFingerprint,
+        // 有缓存指纹 → 直连 pin 跳过发现；空串（尚未 TOFU 过）→ null 走发现/TOFU 回退。
+        cachedFingerprint: device.fingerprint.isNotEmpty ? device.fingerprint : null,
         filePath: path,
       ),
     ));

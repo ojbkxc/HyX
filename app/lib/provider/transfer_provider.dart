@@ -31,6 +31,12 @@ class TransferState {
   final String? errorMessage;
   final bool autoListening;
 
+  /// TOFU 连接成功后回传的对端指纹（hex），由 `_UpdateProgressAction` 从
+  /// `RsProgressEvent.peerFingerprint` 写入。非 null 表示本次传输走了 TOFU 路径，
+  /// 已通过 `UpdateDeviceFingerprintByAddrAction` 缓存到 `KnownDevice.fingerprint`。
+  /// 供 UI / 调试观察；传输重置后随 state 一起清空。
+  final String? peerFingerprint;
+
   const TransferState({
     this.direction = RsTransferDirection.send,
     this.status = model.RsTransferStatus.idle,
@@ -43,6 +49,7 @@ class TransferState {
     this.endTime,
     this.errorMessage,
     this.autoListening = false,
+    this.peerFingerprint,
   });
 
   /// 进度分数 0..1。`total == 0` 时返回 0。
@@ -73,6 +80,7 @@ class TransferState {
     String? errorMessage,
     bool clearError = false,
     bool? autoListening,
+    String? peerFingerprint,
   }) =>
       TransferState(
         direction: direction ?? this.direction,
@@ -86,6 +94,7 @@ class TransferState {
         endTime: endTime ?? this.endTime,
         errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
         autoListening: autoListening ?? this.autoListening,
+        peerFingerprint: peerFingerprint ?? this.peerFingerprint,
       );
 
   static const idle = TransferState();
@@ -242,11 +251,18 @@ class StopAutoListenAction extends ReduxAction<TransferService, TransferState> {
 
 /// 直连发送文件到 `peerAddress`。
 ///
-/// 对应 Rust `connect_direct`：使用已知的对端证书指纹直连，跳过 discovery，
-/// 避免与 `start_listener` 的 DiscoveryManager 端口冲突。
+/// 对应 Rust `connect`：统一发送入口，内部按 `cachedFingerprint` 决策：
+/// - 有缓存指纹 → 直接 pin 连接，跳过 UDP 发现；
+/// - 无缓存但有地址 → 短超时发现拿指纹 → pin 连接，发现失败回退 TOFU；
+/// - 无地址 → 自动发现（原行为）。
+///
+/// TOFU 连接成功后，Rust 侧通过 `RsProgressEvent.peerFingerprint` 回传实际指纹，
+/// 由 [_UpdateProgressAction] 缓存到 `KnownDevice.fingerprint`，后续连接直接 pin。
 class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
   final String peerAddress;
-  final List<int> peerFingerprint;
+  /// 缓存的对端指纹（hex），从 `KnownDevice.fingerprint` 传入。
+  /// null / 空串视为无缓存，走发现 / TOFU 回退路径。
+  final String? cachedFingerprint;
   final String filePath;
   final int port;
   final int chunkBytes;
@@ -254,7 +270,7 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
 
   StartSendAction({
     required this.peerAddress,
-    required this.peerFingerprint,
+    this.cachedFingerprint,
     required this.filePath,
     this.port = 0,
     this.chunkBytes = 1024 * 1024,
@@ -268,13 +284,13 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
 
     final name = filePath.split(RegExp(r'[/\\]')).last;
     try {
-      final stream = rust_transfer.connectDirect(
+      final stream = rust_transfer.connect(
         peerAddress: peerAddress,
-        peerFingerprint: peerFingerprint,
         filePath: filePath,
         chunkBytes: chunkBytes,
         compression: compression,
         port: port,
+        cachedFingerprint: cachedFingerprint,
       );
       notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
@@ -293,7 +309,6 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
       peerAddress: peerAddress,
       startTime: DateTime.now(),
       clearError: true,
-
     );
   }
 }
@@ -364,6 +379,16 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
         unawaited(dispatchAsync(StartAutoListenAction()));
       }
     }
+
+    // TOFU 连接成功后，Rust 侧通过 peerFingerprint 回传对端实际指纹（hex）。
+    // 非 null 且非空 → 本次走了 TOFU 路径，把指纹缓存到匹配的 KnownDevice，
+    // 后续连接直接 pin 跳过 UDP 发现。通过 peerAddress 关联已知设备。
+    if (event.peerFingerprint != null && event.peerFingerprint!.isNotEmpty) {
+      unawaited(notifier._deviceService.dispatchAsync(
+        UpdateDeviceFingerprintByAddrAction(state.peerAddress, event.peerFingerprint!),
+      ));
+    }
+
     // 自动监听接收时 startTime 未在 action 中设置，首次收到 transferring 事件时补上，
     // 确保 [TransferProgressSheet] 能正确计算耗时与添加历史记录。
     final shouldSetStart = state.startTime == null &&
@@ -381,6 +406,7 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
       startTime: shouldSetStart ? DateTime.now() : null,
       endTime: isDone ? DateTime.now() : null,
       errorMessage: event.message,
+      peerFingerprint: event.peerFingerprint,
     );
   }
 }

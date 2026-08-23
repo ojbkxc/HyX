@@ -40,6 +40,14 @@ class KnownDevice {
   /// 对端证书指纹（SHA-256，32 字节），用于直连时 TLS pinning。
   final List<int> certFingerprint;
 
+  /// peer 证书指纹（hex 编码），用于发送时跳过发现直连。
+  ///
+  /// 与 [certFingerprint] 表达同一指纹，仅编码不同：[certFingerprint] 是原始字节
+  /// （供旧 `connectDirect` 用），[fingerprint] 是 hex 字符串（供新 `connect` 的
+  /// `cachedFingerprint` 参数与持久化）。空串表示尚未缓存（首次 TOFU 连接成功后
+  /// 由 [UpdateDeviceFingerprintByAddrAction] 回填）。
+  final String fingerprint;
+
   /// 是否允许接收来自此设备的文件传输。默认 true。
   final bool allowReceive;
 
@@ -51,6 +59,7 @@ class KnownDevice {
     required this.name,
     required this.addr,
     this.certFingerprint = const [],
+    this.fingerprint = '',
     this.allowReceive = true,
     required this.lastSeen,
   });
@@ -59,6 +68,7 @@ class KnownDevice {
     String? name,
     String? addr,
     List<int>? certFingerprint,
+    String? fingerprint,
     bool? allowReceive,
     int? lastSeen,
   }) =>
@@ -67,6 +77,7 @@ class KnownDevice {
         name: name ?? this.name,
         addr: addr ?? this.addr,
         certFingerprint: certFingerprint ?? this.certFingerprint,
+        fingerprint: fingerprint ?? this.fingerprint,
         allowReceive: allowReceive ?? this.allowReceive,
         lastSeen: lastSeen ?? this.lastSeen,
       );
@@ -76,6 +87,7 @@ class KnownDevice {
         'name': name,
         'addr': addr,
         'certFingerprint': certFingerprint,
+        'fingerprint': fingerprint,
         'allowReceive': allowReceive,
         'lastSeen': lastSeen,
       };
@@ -85,6 +97,8 @@ class KnownDevice {
         name: json['name'] as String,
         addr: json['addr'] as String,
         certFingerprint: (json['certFingerprint'] as List<dynamic>?)?.cast<int>() ?? const [],
+        // 旧 JSON 缺 fingerprint 字段时视为空串，向后兼容。
+        fingerprint: (json['fingerprint'] as String?) ?? '',
         allowReceive: (json['allowReceive'] as bool?) ?? true,
         lastSeen: (json['lastSeen'] as num).toInt(),
       );
@@ -156,11 +170,12 @@ class DeviceState {
       final id = p.deviceId.toString();
       final known = knownDevices[id];
       if (known != null) {
-        // 同步最新的 name/addr/certFingerprint（持久化值可能过期）。
+        // 同步最新的 name/addr/certFingerprint/fingerprint（持久化值可能过期）。
         result.add(known.copyWith(
           name: p.name,
           addr: p.addr,
           certFingerprint: p.certFingerprint,
+          fingerprint: p.fingerprint,
         ));
       } else {
         result.add(KnownDevice(
@@ -168,6 +183,7 @@ class DeviceState {
           name: p.name,
           addr: p.addr,
           certFingerprint: p.certFingerprint,
+          fingerprint: p.fingerprint,
           allowReceive: true,
           lastSeen: DateTime.now().millisecondsSinceEpoch,
         ));
@@ -325,6 +341,7 @@ class RefreshPeersAction extends AsyncReduxAction<DeviceService, DeviceState> {
             name: p.name,
             addr: p.addr,
             certFingerprint: p.certFingerprint,
+            fingerprint: p.fingerprint,
             allowReceive: true,
             lastSeen: now,
           );
@@ -332,11 +349,14 @@ class RefreshPeersAction extends AsyncReduxAction<DeviceService, DeviceState> {
         } else {
           final stale = now - existing.lastSeen > 60000;
           final fpChanged = !_fpEquals(existing.certFingerprint, p.certFingerprint);
-          if (existing.name != p.name || existing.addr != p.addr || stale || fpChanged) {
+          // hex 指纹变化也视为变更（peer 换了 identity），触发持久化更新。
+          final hexFpChanged = existing.fingerprint != p.fingerprint;
+          if (existing.name != p.name || existing.addr != p.addr || stale || fpChanged || hexFpChanged) {
             known[id] = existing.copyWith(
               name: p.name,
               addr: p.addr,
               certFingerprint: p.certFingerprint,
+              fingerprint: p.fingerprint,
               lastSeen: now,
             );
             changed = true;
@@ -411,5 +431,43 @@ class ToggleAutoDiscoveryAction extends ReduxAction<DeviceService, DeviceState> 
       dispatch(StopDiscoveryAction());
       return state.copyWith(autoDiscovery: false);
     }
+  }
+}
+
+/// 更新已知设备的 fingerprint（TOFU 连接成功后回传）。
+///
+/// 由 [TransferService] 的 `_UpdateProgressAction` 在收到 `RsProgressEvent.peerFingerprint`
+/// 非空时触发：TOFU 路径握手成功后，Rust 侧把对端实际指纹 hex 回传，Dart 侧据此
+/// 更新对应 `KnownDevice.fingerprint` 并持久化，后续连接直接 pin 跳过 UDP 发现。
+///
+/// 通过 `addr`（ip:port）匹配 [DeviceState.knownDevices] 中的设备：TOFU 回传事件
+/// 不携带 deviceId，仅能用发起连接时的 peerAddress 关联。若匹配不到（设备已被删除
+/// 或地址已变）则静默返回，不报错。
+class UpdateDeviceFingerprintByAddrAction extends AsyncReduxAction<DeviceService, DeviceState> {
+  /// 对端地址（ip:port），用于在 knownDevices 中查找匹配设备。
+  final String addr;
+
+  /// 对端证书指纹（hex 编码），由 TOFU 连接握手后从 TLS 层取出。
+  final String fingerprint;
+
+  UpdateDeviceFingerprintByAddrAction(this.addr, this.fingerprint);
+
+  @override
+  Future<DeviceState> reduce() async {
+    final known = Map<String, KnownDevice>.from(state.knownDevices);
+    // 按 addr 匹配已知设备（knownDevices 以 deviceId 为 key，需遍历）。
+    String? matchedId;
+    for (final entry in known.entries) {
+      if (entry.value.addr == addr) {
+        matchedId = entry.key;
+        break;
+      }
+    }
+    if (matchedId == null) return state;
+    // 指纹未变则无需持久化。
+    if (known[matchedId]!.fingerprint == fingerprint) return state;
+    known[matchedId] = known[matchedId]!.copyWith(fingerprint: fingerprint);
+    unawaited(notifier._persistKnown(known));
+    return state.copyWith(knownDevices: known);
   }
 }
