@@ -58,7 +58,7 @@ class _HomePageState extends State<HomePage> with Refena {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+
     final devState = context.watch(deviceProvider);
     final transferState = context.watch(transferProvider);
 
@@ -102,20 +102,7 @@ class _HomePageState extends State<HomePage> with Refena {
       ),
       drawer: _buildDrawer(context),
       body: _buildBody(context, devState),
-      // FAB：查看接收状态 / 传输进度。
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showTransferSheet(),
-        icon: transferState.busy
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-              )
-            : const Icon(Icons.wifi_tethering),
-        label: Text(transferState.busy ? t.transfer.inProgress : t.home.startReceive),
-        backgroundColor: scheme.primaryContainer,
-        foregroundColor: scheme.onPrimaryContainer,
-      ),
+
     );
   }
 

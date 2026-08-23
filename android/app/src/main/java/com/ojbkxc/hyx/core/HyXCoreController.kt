@@ -289,39 +289,6 @@ class HyXCoreController : ViewModel() {
         )
     }
 
-    fun startTransfer() {
-        if (_status.value == TransferStatus.Transferring) return
-        // Send mode picks a file via the system picker; only Receive mode
-        // has a "start listener" action here.
-        if (_direction.value == TransferDirection.Send) return
-        cancelled = false
-        _status.value = TransferStatus.Connecting
-        transferStartedMs = System.currentTimeMillis()
-        val cfg = _settings.value
-        if (HyXNative.isLoaded) {
-            transferJob = viewModelScope.launch(Dispatchers.IO) {
-                val err = HyXNative.hyxStartListener(
-                    port = 14567,
-                    chunkBytes = 1_048_576,
-                    fsyncEveryBytes = cfg.fsyncEveryBytes,
-                    compression = if (cfg.compression) 1 else 0,
-                    aggregation = if (cfg.aggregation) 1 else 0,
-                    saveDir = HyXNative.receiveDir,
-                    onProgress = simpleProgressCb
-                )
-                if (cancelled) return@launch
-                if (err.isNullOrEmpty()) {
-                    markCompleted()
-                    exportReceivedToDownloads()
-                } else {
-                    failTransfer(err)
-                }
-            }
-        } else {
-            // No library: simulate a transfer so the UI stays demonstrable.
-            simulateTransfer()
-        }
-    }
 
     /**
      * 启动自动监听接收（应用启动时调用，对齐 Flutter app 的 StartAutoListenAction）。
