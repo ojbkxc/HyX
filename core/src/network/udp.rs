@@ -7,6 +7,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, SystemTime};
 
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::net::UdpSocket;
 use tracing::{trace, warn};
 use uuid::Uuid;
@@ -38,8 +39,14 @@ impl DiscoveryService {
         let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), discovery_port);
 
         trace!("Creating discovery service on port {}", discovery_port);
-        let socket = UdpSocket::bind(bind_addr).await?;
-        socket.set_broadcast(true)?;
+        // 用 socket2 创建 socket 并设置 SO_REUSEADDR，允许多个 socket 同时绑定
+        // 同一发现端口（如监听中 + 发送方临时 discovery 同时存在），避免端口冲突。
+        let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        sock.set_reuse_address(true)?;
+        sock.set_broadcast(true)?;
+        sock.bind(&SockAddr::from(bind_addr))?;
+        let std_socket: std::net::UdpSocket = sock.into();
+        let socket = tokio::net::UdpSocket::from_std(std_socket);
 
         let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), discovery_port);
 

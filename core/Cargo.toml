@@ -33,6 +33,9 @@ rustls-pki-types = "1"
 rcgen = "0.13"
 hyx-rendezvous = { path = "../rendezvous" }
 
+# UDP 发现端口需要 SO_REUSEADDR，避免监听 + 发送同时绑定 14566 时端口冲突。
+socket2 = "0.5"
+
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3.12"

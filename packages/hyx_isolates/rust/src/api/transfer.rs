@@ -21,12 +21,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use flutter_rust_bridge::frb;
-use hyx_core::DEFAULT_RENDEZVOUS_PORT;
 use hyx_core::progress::{ProgressCallback, ProgressState};
 use hyx_core::protocol::ConfigMessage;
 use hyx_core::reconnect::ReconnectConfig;
 use hyx_core::session::P2PSession;
 use hyx_core::transfer_folder::AcceptDecision;
+use hyx_core::DEFAULT_RENDEZVOUS_PORT;
 use tokio::runtime::{Builder, Runtime};
 use tokio::task::AbortHandle;
 
@@ -397,6 +397,95 @@ pub fn connect(
         };
         let mut session =
             match P2PSession::connect(addr, fp, identity(), current_device_id(), cfg).await {
+                Ok(s) => s,
+                Err(e) => {
+                    emit_final(
+                        &sink_clone,
+                        RsTransferStatus::Failed,
+                        Some(e.to_string()),
+                        RsTransferDirection::Send,
+                    );
+                    return;
+                }
+            };
+        let res = send_path(&mut session, &path, &sink_clone).await;
+        match res {
+            Ok(()) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Completed,
+                None,
+                RsTransferDirection::Send,
+            ),
+            Err(e) => emit_final(
+                &sink_clone,
+                RsTransferStatus::Failed,
+                Some(e.to_string()),
+                RsTransferDirection::Send,
+            ),
+        }
+    });
+    track(join.abort_handle());
+
+    Ok(())
+}
+
+/// 直连发送文件，使用已知的对端指纹，跳过 discovery。
+///
+/// 从 UI 设备列表发送时调用，避免与 `start_listener` 的 DiscoveryManager 端口冲突。
+///
+/// # Arguments
+/// - `peer_address`：对端地址（`ip:port`）。
+/// - `peer_fingerprint`：对端证书指纹（32 字节，来自 `RsDiscoveredPeer.cert_fingerprint`）。
+/// - `file_path`：待发送文件路径。
+/// - `chunk_bytes` / `compression`：传输参数。
+/// - `port`：对端端口（0 视为默认 14567）。
+/// - `sink`：进度事件流。
+#[frb]
+pub fn connect_direct(
+    peer_address: String,
+    peer_fingerprint: Vec<u8>,
+    file_path: String,
+    chunk_bytes: i32,
+    compression: i32,
+    port: i32,
+    sink: StreamSink<RsProgressEvent>,
+) -> Result<()> {
+    let cfg = config_from(chunk_bytes, compression);
+    let port_u16 = if port > 0 {
+        port as u16
+    } else {
+        hyx_core::DEFAULT_TRANSFER_PORT
+    };
+    let path = file_path.clone();
+    let sink_clone = sink.clone();
+
+    let join = runtime().spawn(async move {
+        let peer_addr = match P2PSession::resolve_peer_addr(&peer_address, port_u16).await {
+            Ok(a) => a,
+            Err(e) => {
+                emit_final(
+                    &sink_clone,
+                    RsTransferStatus::Failed,
+                    Some(e.to_string()),
+                    RsTransferDirection::Send,
+                );
+                return;
+            }
+        };
+        let fp: [u8; 32] = match peer_fingerprint.as_slice().try_into() {
+            Ok(arr) => arr,
+            Err(_) => {
+                emit_final(
+                    &sink_clone,
+                    RsTransferStatus::Failed,
+                    Some("invalid fingerprint length".to_string()),
+                    RsTransferDirection::Send,
+                );
+                return;
+            }
+        };
+        let mut session =
+            match P2PSession::connect(peer_addr, fp, identity(), current_device_id(), cfg).await {
                 Ok(s) => s,
                 Err(e) => {
                     emit_final(

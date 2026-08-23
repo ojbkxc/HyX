@@ -260,7 +260,11 @@ class _HomePageState extends State<HomePage> with Refena {
 
     if (!context.mounted) return;
     unawaited(context.redux(transferProvider).dispatchAsync(
-      StartSendAction(peerAddress: device.addr, filePath: path),
+      StartSendAction(
+        peerAddress: device.addr,
+        peerFingerprint: device.certFingerprint,
+        filePath: path,
+      ),
     ));
     _showTransferSheet();
   }

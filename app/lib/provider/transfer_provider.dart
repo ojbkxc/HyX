@@ -242,9 +242,11 @@ class StopAutoListenAction extends ReduxAction<TransferService, TransferState> {
 
 /// 直连发送文件到 `peerAddress`。
 ///
-/// 对应 Rust `connect`。`peerAddress` 为空时由 Rust 侧自动发现 LAN peer。
+/// 对应 Rust `connect_direct`：使用已知的对端证书指纹直连，跳过 discovery，
+/// 避免与 `start_listener` 的 DiscoveryManager 端口冲突。
 class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
   final String peerAddress;
+  final List<int> peerFingerprint;
   final String filePath;
   final int port;
   final int chunkBytes;
@@ -252,6 +254,7 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
 
   StartSendAction({
     required this.peerAddress,
+    required this.peerFingerprint,
     required this.filePath,
     this.port = 0,
     this.chunkBytes = 1024 * 1024,
@@ -265,7 +268,14 @@ class StartSendAction extends AsyncReduxAction<TransferService, TransferState> {
 
     final name = filePath.split(RegExp(r'[/\\]')).last;
     try {
-      final stream = rust_transfer.connect(peerAddress: peerAddress, filePath: filePath, chunkBytes: chunkBytes, compression: compression, port: port);
+      final stream = rust_transfer.connectDirect(
+        peerAddress: peerAddress,
+        peerFingerprint: peerFingerprint,
+        filePath: filePath,
+        chunkBytes: chunkBytes,
+        compression: compression,
+        port: port,
+      );
       notifier._sub = stream.listen((e) => dispatch(_UpdateProgressAction(e)));
     } catch (e) {
       unawaited(notifier._sub?.cancel());

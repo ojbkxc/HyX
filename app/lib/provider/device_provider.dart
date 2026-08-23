@@ -13,6 +13,16 @@ final _logger = Logger('DeviceProvider');
 /// 已知设备持久化在 SharedPreferences 的 key。
 const _kKnownDevicesPrefKey = 'hyx_known_devices';
 
+/// 比较两个证书指纹（List<int>）是否相等。
+/// Dart 的 List `==` 是引用比较，需逐字节比对。
+bool _fpEquals(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
 /// 已知设备（含接收/禁止状态与最后已知地址）。
 ///
 /// 用 [deviceId]（Uuid 字符串）作为唯一标识，跨在线/历史状态复用。
@@ -27,6 +37,9 @@ class KnownDevice {
   /// 最后已知地址（ip:port）。
   final String addr;
 
+  /// 对端证书指纹（SHA-256，32 字节），用于直连时 TLS pinning。
+  final List<int> certFingerprint;
+
   /// 是否允许接收来自此设备的文件传输。默认 true。
   final bool allowReceive;
 
@@ -37,6 +50,7 @@ class KnownDevice {
     required this.deviceId,
     required this.name,
     required this.addr,
+    this.certFingerprint = const [],
     this.allowReceive = true,
     required this.lastSeen,
   });
@@ -44,6 +58,7 @@ class KnownDevice {
   KnownDevice copyWith({
     String? name,
     String? addr,
+    List<int>? certFingerprint,
     bool? allowReceive,
     int? lastSeen,
   }) =>
@@ -51,6 +66,7 @@ class KnownDevice {
         deviceId: deviceId,
         name: name ?? this.name,
         addr: addr ?? this.addr,
+        certFingerprint: certFingerprint ?? this.certFingerprint,
         allowReceive: allowReceive ?? this.allowReceive,
         lastSeen: lastSeen ?? this.lastSeen,
       );
@@ -59,6 +75,7 @@ class KnownDevice {
         'deviceId': deviceId,
         'name': name,
         'addr': addr,
+        'certFingerprint': certFingerprint,
         'allowReceive': allowReceive,
         'lastSeen': lastSeen,
       };
@@ -67,6 +84,7 @@ class KnownDevice {
         deviceId: json['deviceId'] as String,
         name: json['name'] as String,
         addr: json['addr'] as String,
+        certFingerprint: (json['certFingerprint'] as List<dynamic>?)?.cast<int>() ?? const [],
         allowReceive: (json['allowReceive'] as bool?) ?? true,
         lastSeen: (json['lastSeen'] as num).toInt(),
       );
@@ -138,13 +156,18 @@ class DeviceState {
       final id = p.deviceId.toString();
       final known = knownDevices[id];
       if (known != null) {
-        // 同步最新的 name/addr（持久化值可能过期）。
-        result.add(known.copyWith(name: p.name, addr: p.addr));
+        // 同步最新的 name/addr/certFingerprint（持久化值可能过期）。
+        result.add(known.copyWith(
+          name: p.name,
+          addr: p.addr,
+          certFingerprint: p.certFingerprint,
+        ));
       } else {
         result.add(KnownDevice(
           deviceId: id,
           name: p.name,
           addr: p.addr,
+          certFingerprint: p.certFingerprint,
           allowReceive: true,
           lastSeen: DateTime.now().millisecondsSinceEpoch,
         ));
@@ -301,14 +324,21 @@ class RefreshPeersAction extends AsyncReduxAction<DeviceService, DeviceState> {
             deviceId: id,
             name: p.name,
             addr: p.addr,
+            certFingerprint: p.certFingerprint,
             allowReceive: true,
             lastSeen: now,
           );
           changed = true;
         } else {
           final stale = now - existing.lastSeen > 60000;
-          if (existing.name != p.name || existing.addr != p.addr || stale) {
-            known[id] = existing.copyWith(name: p.name, addr: p.addr, lastSeen: now);
+          final fpChanged = !_fpEquals(existing.certFingerprint, p.certFingerprint);
+          if (existing.name != p.name || existing.addr != p.addr || stale || fpChanged) {
+            known[id] = existing.copyWith(
+              name: p.name,
+              addr: p.addr,
+              certFingerprint: p.certFingerprint,
+              lastSeen: now,
+            );
             changed = true;
           }
         }

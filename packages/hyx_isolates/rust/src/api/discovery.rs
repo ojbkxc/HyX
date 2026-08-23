@@ -70,6 +70,7 @@ pub async fn discover(port: i32) -> Result<Vec<RsDiscoveredPeer>> {
                 name: p.device_name,
                 addr: addr.to_string(),
                 device_id: p.device_id,
+                cert_fingerprint: p.cert_fingerprint.to_vec(),
             }
         })
         .collect();

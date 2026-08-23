@@ -118,4 +118,6 @@ pub struct RsDiscoveredPeer {
     pub addr: String,
     /// peer 的稳定设备 ID。
     pub device_id: Uuid,
+    /// peer 的证书指纹（SHA-256，32 字节），用于直连时 TLS pinning。
+    pub cert_fingerprint: Vec<u8>,
 }
