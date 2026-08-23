@@ -1,0 +1,202 @@
+name: Pre-Release
+
+# 每次 push main 自动构建 v2.0.0 预发布版本（Flutter APK + 原生轻量 APK）
+# 参考 Lxchat prerelease.yml 机制：先删旧 v2.0.0 release+tag，再创建新的 --prerelease
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: "3.41.9"
+  APK_BUILD_DIR: "/tmp/build"
+  VERSION: "2.0.0"
+  TAG: "v2.0.0"
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Android APK（Flutter app，arm64）
+  # ─────────────────────────────────────────────────────────────
+  build_apk:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 复制文件到 $APK_BUILD_DIR
+        run: |
+          mkdir -p $APK_BUILD_DIR
+          cp -r . $APK_BUILD_DIR
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: 安装 Rust（Android target）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-linux-android
+
+      - name: 检查 rust-toolchain.toml
+        working-directory: ${{ env.APK_BUILD_DIR }}/packages/hyx_isolates
+        run: rustup show
+
+      - name: 生成平台配置
+        working-directory: ${{ env.APK_BUILD_DIR }}/app
+        run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
+      - name: 更新 Gradle 版本
+        working-directory: ${{ env.APK_BUILD_DIR }}/app
+        run: sed -i 's/gradle-[0-9.]*-all.zip/gradle-8.13-all.zip/' android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: 依赖
+        working-directory: ${{ env.APK_BUILD_DIR }}/app
+        run: flutter pub get
+
+      - name: 安装 flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: 生成 FRB 绑定
+        working-directory: ${{ env.APK_BUILD_DIR }}/packages/hyx_isolates
+        run: flutter_rust_bridge_codegen generate
+
+      - name: 生成 i18n 代码
+        working-directory: ${{ env.APK_BUILD_DIR }}/app
+        run: dart run slang
+
+      - name: 构建 APK（arm64）
+        working-directory: ${{ env.APK_BUILD_DIR }}/app
+        run: flutter build apk --target-platform android-arm64 --release
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-result
+          path: |
+            ${{ env.APK_BUILD_DIR }}/app/build/app/outputs/flutter-apk/app-release.apk
+
+  # ─────────────────────────────────────────────────────────────
+  # Android APK 轻量版（Kotlin + Rust JNI，无 Flutter 引擎，arm64）
+  # ─────────────────────────────────────────────────────────────
+  build_apk_lite:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-linux-android
+
+      - name: 安装 cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: 配置 Android NDK（使用 runner 预装）
+        run: |
+          NDK_PATH=$(ls -d /usr/local/lib/android/sdk/ndk/*/ | head -1)
+          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
+          echo "NDK_PATH=${NDK_PATH}"
+          ls "${NDK_PATH}"
+
+      - name: 安装 Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: 构建 APK 轻量版
+        working-directory: android
+        run: gradle assembleRelease --no-daemon
+
+      - name: 上传 APK 轻量版
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-lite-result
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
+  # 收集 artifact，删除旧 v2.0.0 release+tag，创建新 prerelease
+  # ─────────────────────────────────────────────────────────────
+  prerelease:
+    needs:
+      - build_apk
+      - build_apk_lite
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载所有 artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: 重命名 artifact 为发布文件名
+        run: |
+          mkdir -p release-assets
+          # APK（arm64，Flutter 版）
+          cp all-artifacts/apk-result/app-release.apk    "release-assets/HyX-${VERSION}-android-arm64v8.apk" 2>/dev/null || true
+          # APK 轻量版（arm64，Kotlin + Rust JNI，无 Flutter 引擎）
+          cp all-artifacts/apk-lite-result/app-release.apk "release-assets/HyX-${VERSION}-android-arm64v8-lite.apk" 2>/dev/null || true
+          # 列出最终发布文件
+          ls -l release-assets/
+
+      - name: 删除旧预发布 Release（如果存在）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 参照 Lxchat prerelease.yml：先删除旧 v2.0.0 release 和 tag，再重新创建
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          echo "已清理旧预发布 release: $TAG"
+
+      - name: 创建预发布 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## HyX $TAG (预发布版本)"
+            echo ""
+            echo "> ⚠️ 这是预发布版本，包含最新的开发中功能，可能不稳定。"
+            echo ">"
+            echo "> 稳定版请查看 [Releases](https://github.com/${{ github.repository }}/releases/latest)。"
+            echo ""
+            echo "**Commit:** ${{ github.sha }}"
+            echo ""
+            echo "### 下载"
+            echo ""
+            echo "| 平台 | 文件 |"
+            echo "|------|------|"
+            echo "| Android (arm64) | \`HyX-${VERSION}-android-arm64v8.apk\` |"
+            echo "| Android (arm64) 轻量版 | \`HyX-${VERSION}-android-arm64v8-lite.apk\` |"
+            echo ""
+            echo "### 特性"
+            echo "- Rust 内核：QUIC 单连续流 + 断点续传 + 增量 SHA-256"
+            echo "- Flutter 跨平台前端"
+            echo "- 局域网自动发现、直连/配对码互传、NAT 穿透"
+          } > /tmp/release_notes.md
+          gh release create "$TAG" \
+            --title "HyX $TAG (预发布版本)" \
+            --notes-file /tmp/release_notes.md \
+            --prerelease \
+            --target ${{ github.sha }} \
+            $(find release-assets -type f)

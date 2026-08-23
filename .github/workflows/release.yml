@@ -20,6 +20,8 @@ jobs:
   # 读取版本号（来自 pubspec.yaml 或 workflow_dispatch 输入）
   # ─────────────────────────────────────────────────────────────
   build:
+    # 排除 v2.0.0：该 tag 由 prerelease.yml 维护，不触发正式 release
+    if: github.ref_name != 'v2.0.0'
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.get_version.outputs.version }}
