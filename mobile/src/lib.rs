@@ -124,8 +124,8 @@ fn decode_fingerprint(s: &str) -> std::result::Result<hyx_core::identity::Finger
     let mut fp = [0u8; 32];
     let bytes = s.as_bytes();
     for (i, chunk) in bytes.chunks_exact(2).enumerate() {
-        let hi = u8::from_str_radix(chunk[0] as char).map_err(|_| ())?;
-        let lo = u8::from_str_radix(chunk[1] as char).map_err(|_| ())?;
+        let hi = (chunk[0] as char).to_digit(16).ok_or(())? as u8;
+        let lo = (chunk[1] as char).to_digit(16).ok_or(())? as u8;
         fp[i] = (hi << 4) | lo;
     }
     Ok(fp)
