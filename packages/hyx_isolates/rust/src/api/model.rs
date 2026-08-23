@@ -82,6 +82,14 @@ pub struct RsProgressEvent {
 
     /// 失败/完成时的可选消息（对应 mobile `Evt::Done` 的 `Result<String, String>`）。
     pub message: Option<String>,
+
+    /// TOFU 连接成功后回传的 peer 证书指纹（hex），供 Dart 侧缓存到 `KnownDevice.fingerprint`，
+    /// 后续连接直接 pin 跳过 UDP 发现。
+    ///
+    /// 仅在首次 TOFU 连接（`connect` 走 `connect_tofu` 回退路径）建立成功后非 `None`；
+    /// pin 连接、接收、rendezvous 路径均为 `None`。Dart 侧 `transfer_provider` 监听到
+    /// 非 `None` 时把它写入对应 `KnownDevice.fingerprint` 持久化。
+    pub peer_fingerprint: Option<String>,
 }
 
 /// 日志事件。用 `StreamSink<RsLogEvent>` 替代 mobile 的 JNI `onLog(level, tag, msg)` 回调。
@@ -120,4 +128,11 @@ pub struct RsDiscoveredPeer {
     pub device_id: Uuid,
     /// peer 的证书指纹（SHA-256，32 字节），用于直连时 TLS pinning。
     pub cert_fingerprint: Vec<u8>,
+    /// peer 证书指纹（hex 编码），供发送端缓存后跳过发现直连。
+    ///
+    /// 与 `cert_fingerprint` 表达同一指纹，只是编码不同：`cert_fingerprint` 是原始字节
+    /// （供 `connect_direct` 直接传入），`fingerprint` 是 hex 字符串（供 Dart 侧
+    /// `KnownDevice.fingerprint` 持久化与 `connect` 的 `cached_fingerprint` 参数）。
+    /// 两者始终一致，由 `discovery::discover` 同时填充。
+    pub fingerprint: String,
 }

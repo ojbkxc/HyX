@@ -131,6 +131,36 @@ impl QuicEndpoint {
         QuicConnection::open_control_initiator(connection).await
     }
 
+    /// Initiate a TOFU (Trust-On-First-Use) connection to `peer_addr`
+    /// without pinning the peer's cert fingerprint. The TLS handshake
+    /// accepts whatever self-signed cert the peer presents; the caller
+    /// is expected to retrieve the actual fingerprint from the returned
+    /// connection via [`QuicConnection::peer_fingerprint`] after the
+    /// application handshake completes, and persist it so subsequent
+    /// connections can use the strict [`QuicEndpoint::connect`] path.
+    ///
+    /// Apart from the TLS verifier, this is identical to [`connect`]:
+    /// same transport config, same ALPN, same control-stream priming.
+    /// The local client cert is still presented so the responder's
+    /// mutual-TLS requirement is satisfied.
+    pub async fn connect_tofu(&self, peer_addr: SocketAddr) -> Result<QuicConnection> {
+        let client_crypto = tls::client_config_tofu(&self.identity)?;
+        let quic_client_crypto = QuicClientConfig::try_from(client_crypto.as_ref().clone())
+            .map_err(|e| Error::Tls(format!("QuicClientConfig: {e}")))?;
+        let mut client_cfg = ClientConfig::new(Arc::new(quic_client_crypto));
+        client_cfg.transport_config(Arc::new(transport_config()));
+
+        let connecting = self
+            .endpoint
+            .connect_with(client_cfg, peer_addr, "hyx")
+            .map_err(|e| Error::Quic(format!("connect_with: {e}")))?;
+        let connection = connecting
+            .await
+            .map_err(|e| Error::Quic(format!("handshake: {e}")))?;
+        debug!(remote = %connection.remote_address(), "QUIC outbound connected (TOFU)");
+        QuicConnection::open_control_initiator(connection).await
+    }
+
     /// Accept the next inbound connection. The peer's cert is **not** pinned
     /// here — the application-level HELLO message carries the claimed
     /// fingerprint and the caller is responsible for cross-checking it

@@ -25,7 +25,7 @@ use hyx_core::reconnect::ReconnectConfig;
 use hyx_core::session::P2PSession;
 use hyx_core::transfer_folder::AcceptDecision;
 use hyx_core::Uuid;
-use hyx_core::DEFAULT_RENDEZVOUS_PORT;
+use hyx_core::{DEFAULT_RENDEZVOUS_PORT, DEFAULT_TRANSFER_PORT};
 use jni::objects::{GlobalRef, JObject, JValue};
 use jni::sys::{jint, jlong, jobject};
 use jni::{JNIEnv, JavaVM};
@@ -38,6 +38,10 @@ use tracing_subscriber::layer::{Context, Layer};
 enum Evt {
     /// Phase 2 always; `(bytes_done, bytes_total, speed_bps)`.
     Progress(u64, u64, i64),
+    /// TOFU 连接成功后回传 peer fingerprint（hex），供 Kotlin 缓存。
+    /// 仅在 `hyxConnectWithFp` 走 TOFU 回退路径时发送；Kotlin 侧
+    /// `ProgressCallback.onPeerFingerprint(String)` 收到后写入 KnownDevice 持久化。
+    PeerFingerprint(String),
     /// Transfer finished: `Ok(summary)` or `Err(message)`.
     Done(Result<String, String>),
 }
@@ -102,6 +106,42 @@ fn config_from(chunk_bytes: jint, compression: jint) -> ConfigMessage {
         }
     }
     c
+}
+
+/// Decode a hex-encoded peer fingerprint (64 hex chars → 32 bytes).
+/// Returns `Ok([u8;32])` on success, `Err(())` if the string is malformed
+/// or not exactly 32 bytes. Used by `hyxConnectWithFp` to parse the
+/// `cached_fingerprint` argument from Kotlin.
+///
+/// Hand-rolled (no `hex` crate dependency) to keep `mobile/Cargo.toml` lean:
+/// two chars per byte via `u8::from_str_radix`, rejecting odd lengths and
+/// non-hex digits. Mirrors `packages/hyx_isolates/rust/src/api/transfer.rs::
+/// decode_fingerprint` so FRB and JNI share identical parsing semantics.
+fn decode_fingerprint(s: &str) -> std::result::Result<hyx_core::identity::Fingerprint, ()> {
+    if s.len() != 64 {
+        return Err(());
+    }
+    let mut fp = [0u8; 32];
+    let bytes = s.as_bytes();
+    for (i, chunk) in bytes.chunks_exact(2).enumerate() {
+        let hi = u8::from_str_radix(chunk[0] as char).map_err(|_| ())?;
+        let lo = u8::from_str_radix(chunk[1] as char).map_err(|_| ())?;
+        fp[i] = (hi << 4) | lo;
+    }
+    Ok(fp)
+}
+
+/// Encode a 32-byte fingerprint as a lowercase hex string (64 chars).
+/// Inverse of [`decode_fingerprint`]; used to ship the TOFU-observed
+/// peer fingerprint back to Kotlin via `Evt::PeerFingerprint` so the
+/// Android side can persist it for the next pin connection.
+fn encode_fingerprint(fp: &hyx_core::identity::Fingerprint) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(64);
+    for b in fp.iter() {
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
 }
 
 /// Progress callback that mirrors bytes into the JNI event channel.
@@ -251,6 +291,21 @@ fn drain(mut env: JNIEnv<'_>, cb: JObject<'_>, rx: &std::sync::mpsc::Receiver<Ev
                     Ok(msg) => new_jstring(&mut env, &msg),
                     Err(err) => new_jstring(&mut env, &err),
                 };
+            }
+            Evt::PeerFingerprint(fp) => {
+                // TOFU 路径回传 peer fingerprint 给 Kotlin 侧缓存。
+                // 调用 cb.onPeerFingerprint(String)；Kotlin 侧
+                // ProgressCallback 接口需声明该方法（task 4 / Android 范畴）。
+                // 异常（如 Kotlin 未实现该方法）被清除，不阻塞后续 Done 事件。
+                if let Ok(jfp) = env.new_string(&fp) {
+                    let _ = env.call_method(
+                        &cb,
+                        "onPeerFingerprint",
+                        "(Ljava/lang/String;)V",
+                        &[JValue::Object(&jfp)],
+                    );
+                    let _ = env.exception_clear();
+                }
             }
         }
     }
@@ -552,6 +607,155 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxConnect<'local>(
                 return;
             }
         };
+        let res = send_path(&mut session, &path, tx.clone()).await;
+        let _ = tx.send(Evt::Done(res));
+    });
+    track(join.abort_handle());
+
+    let out = drain(env, cb, &rx);
+    forget_active();
+    out
+}
+
+/// `String hyxConnectWithFp(String peerAddress, String filePath, int chunkBytes,
+/// int compression, int port, String cachedFingerprint, ProgressCallback cb)` —
+/// connect to `peerAddress` and send `filePath`, with a cached peer
+/// fingerprint for direct pin connection (skipping UDP discovery) and TOFU
+/// fallback when no usable fingerprint is available.
+///
+/// Decision tree (mirrors FRB `transfer.rs::connect` after task 3):
+///   - `peer_address` non-empty + `cached_fingerprint` non-empty valid hex:
+///     direct `P2PSession::connect` with the cached fp (path A — fast path).
+///   - `peer_address` non-empty + `cached_fingerprint` empty/invalid:
+///     try `discover_peer(Some(target))` to obtain the fp; on failure fall
+///     back to `P2PSession::connect_tofu` (path B/C — first-use / re-trust).
+///   - `peer_address` empty: `discover_one_peer` then `P2PSession::connect`
+///     (path D — original auto-discover behavior).
+///
+/// When the TOFU path is taken, the peer fingerprint observed by the TLS
+/// layer is sent back to Kotlin via `Evt::PeerFingerprint` (calling
+/// `cb.onPeerFingerprint(String)`) so the Android side can persist it for
+/// the next pin connection. The pin path does not emit `PeerFingerprint`
+/// (the caller already has it).
+///
+/// `port <= 0` defaults to `DEFAULT_TRANSFER_PORT` (14567), matching
+/// `hyxDiscover`. The legacy `hyxConnect` is preserved unchanged for
+/// backward compatibility with existing Kotlin callers.
+#[no_mangle]
+pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxConnectWithFp<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+    peer_address: jni::objects::JString<'local>,
+    file_path: jni::objects::JString<'local>,
+    chunk_bytes: jint,
+    compression: jint,
+    port: jint,
+    cached_fingerprint: jni::objects::JString<'local>,
+    cb: JObject<'local>,
+) -> jobject {
+    let path = env
+        .get_string(&file_path)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let peer = env
+        .get_string(&peer_address)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let cached_fp_hex = env
+        .get_string(&cached_fingerprint)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cfg = config_from(chunk_bytes, compression);
+    let port_u16 = if port > 0 {
+        port as u16
+    } else {
+        DEFAULT_TRANSFER_PORT
+    };
+
+    let join = runtime().spawn(async move {
+        // Resolve peer address + decide between pin (Some(fp)) and TOFU (None).
+        let (addr, fp_option) = if !peer.is_empty() {
+            // 有明确地址：先 resolve，再按缓存 fingerprint 决策。
+            let target = match P2PSession::resolve_peer_addr(&peer, port_u16).await {
+                Ok(a) => a,
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            };
+
+            if !cached_fp_hex.is_empty() {
+                // 路径 A：有缓存 fingerprint → 直接 pin 连接。
+                match decode_fingerprint(&cached_fp_hex) {
+                    Ok(fp) => (target, Some(fp)),
+                    Err(_) => {
+                        // 缓存无效 → 发现回退拿 fp，再不行就 TOFU。
+                        match P2PSession::discover_peer(
+                            port_u16,
+                            &identity(),
+                            device_id(),
+                            Some(target),
+                        )
+                        .await
+                        {
+                            Ok((a, f)) => (a, Some(f)),
+                            Err(_) => (target, None), // TOFU 回退
+                        }
+                    }
+                }
+            } else {
+                // 无缓存 fingerprint → 发现拿 fp，失败回退 TOFU。
+                match P2PSession::discover_peer(
+                    port_u16,
+                    &identity(),
+                    device_id(),
+                    Some(target),
+                )
+                .await
+                {
+                    Ok((a, f)) => (a, Some(f)),
+                    Err(_) => (target, None), // TOFU 回退
+                }
+            }
+        } else {
+            // 路径 D：无地址 → 自动发现（原行为）。发现失败直接报错，
+            // 不走 TOFU（TOFU 需要明确目标地址）。
+            match P2PSession::discover_one_peer(port_u16, &identity(), device_id()).await {
+                Ok((a, f)) => (a, Some(f)),
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            }
+        };
+
+        // Establish session: pin path uses connect, TOFU path uses connect_tofu.
+        let mut session = match fp_option {
+            Some(fp) => match P2PSession::connect(addr, fp, identity(), device_id(), cfg).await {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            },
+            None => match P2PSession::connect_tofu(addr, identity(), device_id(), cfg).await {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = tx.send(Evt::Done(Err(e.to_string())));
+                    return;
+                }
+            },
+        };
+
+        // TOFU 路径回传实际 peer fingerprint 供 Kotlin 缓存。
+        // pin 路径不回传（调用方已有该 fp）。
+        if fp_option.is_none() {
+            let actual_fp = session.peer_fingerprint();
+            let _ = tx.send(Evt::PeerFingerprint(encode_fingerprint(&actual_fp)));
+        }
+
         let res = send_path(&mut session, &path, tx.clone()).await;
         let _ = tx.send(Evt::Done(res));
     });

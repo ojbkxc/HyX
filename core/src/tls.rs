@@ -87,6 +87,57 @@ pub fn client_config_pinning(
     Ok(Arc::new(cfg))
 }
 
+/// Build a TOFU (Trust-On-First-Use) client config: accept the peer's
+/// self-signed cert without pinning, so the QUIC handshake can complete
+/// even when the caller has no cached fingerprint for the peer. The
+/// caller is expected to retrieve the actual fingerprint from the
+/// established [`crate::network::quic::QuicConnection::peer_fingerprint`]
+/// after the handshake and persist it (e.g. via [`crate::known_peers`])
+/// so subsequent connections can use the strict
+/// [`client_config_pinning`] path.
+///
+/// This is the SSH `StrictHostKeyChecking=accept-new` equivalent: the
+/// first connection trusts whatever cert the peer presents; later
+/// connections pin that fingerprint and a mismatch is a hard failure
+/// (the MITM signal).
+///
+/// # Security boundary
+///
+/// Only call this when:
+/// * the caller has a direct LAN address for the peer but no cached
+///   fingerprint, **or**
+/// * a previous pinning connection failed with `Error::FingerprintMismatch`
+///   and the user opted to re-trust.
+///
+/// Never use this on the rendezvous path — the rendezvous server already
+/// exchanges fingerprints out-of-band, so pinning is available there.
+///
+/// Like [`client_config_pinning`], this still presents the local cert
+/// (`with_client_auth_cert`) so the responder's mutual-TLS requirement
+/// is satisfied and the responder's `peer_fingerprint()` returns `Some`.
+/// Cryptographic signature verification (proving the peer holds the
+/// private key for the presented cert) is still enforced by the active
+/// crypto provider — only identity pinning is skipped.
+pub fn client_config_tofu(identity: &Identity) -> Result<Arc<rustls::ClientConfig>> {
+    install_default_crypto_provider();
+
+    let verifier = Arc::new(AcceptAnyServerCert::new());
+
+    // Present our cert so the responder's mutual-TLS verifier sees our
+    // SPKI and the application-layer HELLO cross-check has something
+    // authoritative to compare against — same reason as in
+    // `client_config_pinning`.
+    let cert_chain = vec![identity.cert_der()];
+    let key = identity.private_key_der();
+    let mut cfg = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
+        .with_client_auth_cert(cert_chain, key)
+        .map_err(|e| Error::Tls(format!("client auth cert: {e}")))?;
+    cfg.alpn_protocols = vec![ALPN_PROTOCOL.to_vec()];
+    Ok(Arc::new(cfg))
+}
+
 /// Constant-time comparison of two 32-byte fingerprints.
 ///
 /// `==` on `[u8; 32]` short-circuits on the first differing byte, leaking
@@ -263,6 +314,92 @@ impl ClientCertVerifier for AcceptAnyClientCert {
     }
 }
 
+/// rustls server-cert verifier that accepts any presented server cert —
+/// the TOFU (Trust-On-First-Use) counterpart to [`AcceptAnyClientCert`].
+///
+/// `AcceptAnyClientCert` is installed on the *server* side so the
+/// responder doesn't pin the client cert; the client identity is then
+/// cross-checked against the HELLO fingerprint at the application layer.
+/// `AcceptAnyServerCert` is installed on the *client* side so the
+/// initiator can complete the TLS handshake without a pre-known server
+/// fingerprint; the actual server fingerprint is read from the
+/// established connection after the handshake and persisted by the
+/// caller, so subsequent connections can use the strict
+/// [`FingerprintVerifier`] path.
+///
+/// Signature verification (proving the peer holds the private key for
+/// the presented cert) is still delegated to the active crypto provider
+/// — only identity pinning is skipped, not cryptographic checks. TLS 1.3
+/// AEAD still authenticates every byte on the wire.
+#[derive(Debug)]
+pub struct AcceptAnyServerCert {
+    schemes: Vec<SignatureScheme>,
+}
+
+impl Default for AcceptAnyServerCert {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AcceptAnyServerCert {
+    pub fn new() -> Self {
+        let provider = rustls::crypto::ring::default_provider();
+        let schemes = provider
+            .signature_verification_algorithms
+            .supported_schemes();
+        Self { schemes }
+    }
+}
+
+impl ServerCertVerifier for AcceptAnyServerCert {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
+        // TOFU: accept whatever cert the peer presents. The caller is
+        // responsible for reading the presented fingerprint from the
+        // established connection and persisting it for future pinning.
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.schemes.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,5 +444,33 @@ mod tests {
             UnixTime::now(),
         );
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn builds_tofu_client_config() {
+        let identity = Identity::generate().unwrap();
+        let client = client_config_tofu(&identity).unwrap();
+        assert_eq!(client.alpn_protocols, vec![ALPN_PROTOCOL.to_vec()]);
+    }
+
+    #[test]
+    fn accept_any_server_cert_verifier_accepts_any_cert() {
+        // Two unrelated identities — the TOFU verifier must accept both,
+        // regardless of which (if any) fingerprint the caller might later
+        // pin. This is the whole point of TOFU: first-use trust.
+        let a = Identity::generate().unwrap();
+        let b = Identity::generate().unwrap();
+        let verifier = AcceptAnyServerCert::new();
+
+        for cert in [a.cert_der(), b.cert_der()] {
+            let res = verifier.verify_server_cert(
+                &cert,
+                &[],
+                &ServerName::try_from("hyx").unwrap(),
+                &[],
+                UnixTime::now(),
+            );
+            assert!(res.is_ok(), "TOFU verifier rejected a presented cert");
+        }
     }
 }

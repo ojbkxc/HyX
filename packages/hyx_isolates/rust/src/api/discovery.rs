@@ -66,11 +66,20 @@ pub async fn discover(port: i32) -> Result<Vec<RsDiscoveredPeer>> {
         .into_iter()
         .map(|p| {
             let addr = p.socket_addr();
+            // hex 编码 32 字节指纹，供 Dart 侧 KnownDevice.fingerprint 持久化。
+            // 手写实现避免给 hyx_isolates 引入 hex crate 直接依赖（core 已有，
+            // 但传递依赖不能直接 use）。32 字节 → 64 个 hex 字符。
+            let fingerprint: String = p
+                .cert_fingerprint
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
             RsDiscoveredPeer {
                 name: p.device_name,
                 addr: addr.to_string(),
                 device_id: p.device_id,
                 cert_fingerprint: p.cert_fingerprint.to_vec(),
+                fingerprint,
             }
         })
         .collect();

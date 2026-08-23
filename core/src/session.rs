@@ -93,6 +93,80 @@ impl P2PSession {
         })
     }
 
+    /// Initiate a TOFU (Trust-On-First-Use) session to `peer_addr` without
+    /// a pre-cached peer fingerprint.
+    ///
+    /// The TLS handshake accepts whatever self-signed cert the peer
+    /// presents (see [`crate::tls::client_config_tofu`]); after the
+    /// application handshake completes, the peer's *actual* fingerprint
+    /// is read from the HELLO message (cross-checked against the cert
+    /// the TLS layer observed, as in [`Self::connect`]) and stored in
+    /// [`Self::initiator_target`] so subsequent [`Self::reconnect`]
+    /// calls pin the correct cert.
+    ///
+    /// # Caller responsibility
+    ///
+    /// The caller should persist the returned peer fingerprint (available
+    /// via [`Self::peer_fingerprint`] on the returned session) into a
+    /// [`crate::known_peers::KnownPeers`] store and the upper-layer
+    /// device cache, so the next connection to the same peer can take
+    /// the strict [`Self::connect`] path and detect a MITM-induced
+    /// identity change as `Error::FingerprintMismatch`.
+    ///
+    /// # Security boundary
+    ///
+    /// Only call this when the caller has a direct LAN address for the
+    /// peer but no cached fingerprint, or when a previous pinning
+    /// connection failed with `Error::FingerprintMismatch` and the user
+    /// opted to re-trust. Never use this on the rendezvous path — the
+    /// rendezvous server already exchanges fingerprints out-of-band.
+    pub async fn connect_tofu(
+        peer_addr: SocketAddr,
+        identity: Arc<Identity>,
+        device_id: Uuid,
+        config: ConfigMessage,
+    ) -> Result<Self> {
+        debug!("Creating TOFU client session to {}", peer_addr);
+
+        let endpoint = QuicEndpoint::bind(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+            identity.clone(),
+        )?;
+        let mut connection = endpoint.connect_tofu(peer_addr).await?;
+        trace!("QUIC connection established (TOFU)");
+
+        let handshake_client = HandshakeClient::new(device_id, &identity);
+        let handshake = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            handshake_client.perform_handshake(&mut connection, config),
+        )
+        .await
+        .map_err(|_| Error::Timeout)??;
+
+        // The handshake layer has already cross-checked the HELLO-claimed
+        // fingerprint against the cert the TLS layer observed (see
+        // `handshake::cross_check_fingerprint`), so `handshake.peer_fingerprint`
+        // is the authoritative value to pin on reconnect. Using it here
+        // means a subsequent `reconnect()` after a transient failure takes
+        // the strict pinning path — TOFU is a one-shot first-use trust.
+        let peer_fingerprint = handshake.peer_fingerprint;
+        debug!(
+            "TOFU session established as initiator (peer: {}, fingerprint: {})",
+            handshake.peer_device_id,
+            hex::encode(peer_fingerprint),
+        );
+
+        Ok(Self {
+            endpoint,
+            connection,
+            identity,
+            session_id: Uuid::new_v4(),
+            device_id,
+            handshake,
+            initiator_target: Some((peer_addr, peer_fingerprint)),
+        })
+    }
+
     /// Establish a session via a rendezvous server + shared code.
     ///
     /// Both peers run this with the same `code` and the same

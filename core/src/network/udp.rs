@@ -44,6 +44,7 @@ impl DiscoveryService {
         let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         sock.set_reuse_address(true)?;
         sock.set_broadcast(true)?;
+        sock.set_nonblocking(true)?;
         sock.bind(&SockAddr::from(bind_addr))?;
         let std_socket: std::net::UdpSocket = sock.into();
         let socket = tokio::net::UdpSocket::from_std(std_socket)?;

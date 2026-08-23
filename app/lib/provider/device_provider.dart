@@ -13,7 +13,7 @@ final _logger = Logger('DeviceProvider');
 /// 已知设备持久化在 SharedPreferences 的 key。
 const _kKnownDevicesPrefKey = 'hyx_known_devices';
 
-/// 比较两个证书指纹（List<int>）是否相等。
+/// 比较两个证书指纹（`List<int>`）是否相等。
 /// Dart 的 List `==` 是引用比较，需逐字节比对。
 bool _fpEquals(List<int> a, List<int> b) {
   if (a.length != b.length) return false;

@@ -98,6 +98,67 @@ fn config_from(chunk_bytes: i32, compression: i32) -> ConfigMessage {
     c
 }
 
+/// 把 32 字节指纹 hex 编码为 String（64 个小写 hex 字符）。
+///
+/// 手写实现避免给 hyx_isolates 引入 `hex` crate 直接依赖（`hyx_core` 已有，
+/// 但传递依赖不能直接 `use`）。与 `discovery::discover` 中填充
+/// `RsDiscoveredPeer.fingerprint` 的编码方式一致。
+fn encode_fingerprint_hex(fp: &hyx_core::identity::Fingerprint) -> String {
+    fp.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// 把 hex 字符串解码为 32 字节指纹。
+///
+/// 供 `connect` 的 `cached_fingerprint` 参数解析：Dart 侧 `KnownDevice.fingerprint`
+/// 持久化的 hex 字符串 → `P2PSession::connect` 需要的 `[u8; 32]`。
+///
+/// # Errors
+///
+/// 返回 `Err(())` 当：
+/// - 字符串长度 ≠ 64（32 字节 × 2 hex 字符）；或
+/// - 包含非 hex 字符。
+///
+/// 调用方应把 `Err` 视为"缓存指纹无效，回退到发现/TOFU 路径"，不向用户报错。
+fn decode_fingerprint_hex(hex: &str) -> std::result::Result<hyx_core::identity::Fingerprint, ()> {
+    if hex.len() != 64 {
+        return Err(());
+    }
+    let mut fp = [0u8; 32];
+    let bytes = hex.as_bytes();
+    for i in 0..32 {
+        let hi = match (bytes[i * 2] as char).to_digit(16) {
+            Some(v) => v as u8,
+            None => return Err(()),
+        };
+        let lo = match (bytes[i * 2 + 1] as char).to_digit(16) {
+            Some(v) => v as u8,
+            None => return Err(()),
+        };
+        fp[i] = (hi << 4) | lo;
+    }
+    Ok(fp)
+}
+
+/// 在 TOFU 连接成功后，通过 `sink` 把对端实际指纹回传给 Dart 侧缓存。
+///
+/// 复用 `RsProgressEvent` 携带 `peer_fingerprint: Some(hex)`，`status: Connecting`
+/// 表示"连接已建立，正在回填缓存"。Dart 侧 `transfer_provider` 监听到非 `None`
+/// 时把它写入对应 `KnownDevice.fingerprint` 持久化，后续连接直接 pin 跳过发现。
+///
+/// 此事件在 `send_path` 之前发出，不携带字节进度（`transferred`/`total` 为 0）。
+fn emit_peer_fingerprint_cached(sink: &StreamSink<RsProgressEvent>, fp_hex: String) {
+    let _ = sink.add(RsProgressEvent {
+        direction: RsTransferDirection::Send,
+        phase: 1,
+        transferred: 0,
+        total: 0,
+        speed: 0.0,
+        status: RsTransferStatus::Connecting,
+        message: None,
+        peer_fingerprint: Some(fp_hex),
+    });
+}
+
 /// 构造一个节流到 ~5 Hz 的 `ProgressCallback`，将字节进度通过 `StreamSink` 推送到 Dart。
 ///
 /// 对应 mobile `progress_sink`：滑动窗口速率，避免每个 chunk 都回调淹没 UI。
@@ -137,6 +198,7 @@ fn progress_sink(
             speed: rate,
             status: RsTransferStatus::Transferring,
             message: None,
+            peer_fingerprint: None,
         });
     })
 }
@@ -220,6 +282,7 @@ fn emit_final(
         speed: 0.0,
         status,
         message: msg,
+        peer_fingerprint: None,
     });
 }
 
@@ -323,11 +386,24 @@ pub fn start_listener(
 ///
 /// 对应 mobile `hyxConnect`。`peer_address` 为空时自动发现 LAN 上的 peer。
 ///
+/// # 决策树（与 design.md §1.2 一致）
+///
+/// - `peer_address` 非空 + `cached_fingerprint` 非空：直接 pin 连接，跳过 UDP 发现。
+///   pin 失败（`FingerprintMismatch`，peer 换了 identity）→ 回退 TOFU 重新信任。
+/// - `peer_address` 非空 + `cached_fingerprint` 空：短超时发现拿指纹 → pin 连接；
+///   发现失败 → TOFU 回退直连。
+/// - `peer_address` 空：自动发现任意 peer → pin 连接（原行为）。
+///
+/// TOFU 连接成功后，通过 `RsProgressEvent.peer_fingerprint` 把对端实际指纹回传给
+/// Dart 侧缓存，后续连接直接 pin 跳过发现。
+///
 /// # Arguments
 /// - `peer_address`：对端地址（`ip:port` 或空串触发自动发现）。
 /// - `file_path`：待发送文件路径。
 /// - `chunk_bytes` / `compression`：传输参数。
 /// - `port`：对端端口（0 视为默认 14567）。
+/// - `cached_fingerprint`：可选缓存 fingerprint（hex）。非空且 `peer_address` 非空时
+///   直接 pin 连接，跳过 UDP 发现。空/`None` 视为无缓存。
 /// - `sink`：进度事件流。
 #[frb]
 pub fn connect(
@@ -336,6 +412,7 @@ pub fn connect(
     chunk_bytes: i32,
     compression: i32,
     port: i32,
+    cached_fingerprint: Option<String>,
     sink: StreamSink<RsProgressEvent>,
 ) -> Result<()> {
     let cfg = config_from(chunk_bytes, compression);
@@ -349,7 +426,11 @@ pub fn connect(
     let sink_clone = sink.clone();
 
     let join = runtime().spawn(async move {
-        let (addr, fp) = if !peer.is_empty() {
+        // ---- 阶段 1：解析地址 + 决定 fingerprint 来源 ----
+        // fp_option: Some(fp) → 走 P2PSession::connect (pin)
+        //             None    → 走 P2PSession::connect_tofu (TOFU 回退)
+        let (addr, fp_option) = if !peer.is_empty() {
+            // 有明确地址 → resolve
             let target = match P2PSession::resolve_peer_addr(&peer, port_u16).await {
                 Ok(a) => a,
                 Err(e) => {
@@ -362,28 +443,50 @@ pub fn connect(
                     return;
                 }
             };
-            match P2PSession::discover_peer(
-                port_u16,
-                &identity(),
-                current_device_id(),
-                Some(target),
-            )
-            .await
-            {
-                Ok(pair) => pair,
-                Err(e) => {
-                    emit_final(
-                        &sink_clone,
-                        RsTransferStatus::Failed,
-                        Some(e.to_string()),
-                        RsTransferDirection::Send,
-                    );
-                    return;
+
+            // 缓存指纹非空且非空串 → 解析后直接用
+            if let Some(fp_hex) = cached_fingerprint.as_ref().filter(|s| !s.is_empty()) {
+                match decode_fingerprint_hex(fp_hex) {
+                    Ok(fp) => (target, Some(fp)),
+                    Err(_) => {
+                        // 缓存指纹无效 → 回退到短超时发现拿指纹
+                        match P2PSession::discover_peer(
+                            port_u16,
+                            &identity(),
+                            current_device_id(),
+                            Some(target),
+                        )
+                        .await
+                        {
+                            Ok((a, f)) => (a, Some(f)),
+                            Err(_) => {
+                                // 发现也失败 → TOFU 回退（无指纹直连）
+                                (target, None)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // 无缓存指纹 → 短超时发现拿指纹
+                match P2PSession::discover_peer(
+                    port_u16,
+                    &identity(),
+                    current_device_id(),
+                    Some(target),
+                )
+                .await
+                {
+                    Ok((a, f)) => (a, Some(f)),
+                    Err(_) => {
+                        // 发现失败 → TOFU 回退
+                        (target, None)
+                    }
                 }
             }
         } else {
+            // 无明确地址 → 自动发现任意 peer（原行为）
             match P2PSession::discover_one_peer(port_u16, &identity(), current_device_id()).await {
-                Ok(pair) => pair,
+                Ok((a, f)) => (a, Some(f)),
                 Err(e) => {
                     emit_final(
                         &sink_clone,
@@ -395,9 +498,66 @@ pub fn connect(
                 }
             }
         };
-        let mut session =
-            match P2PSession::connect(addr, fp, identity(), current_device_id(), cfg).await {
-                Ok(s) => s,
+
+        // ---- 阶段 2：建立 session ----
+        // pin 路径失败 FingerprintMismatch → 回退 TOFU 重新信任
+        // 注意：cfg 被 P2PSession::connect 消耗，回退路径需 cfg.clone()
+        let mut session = match fp_option {
+            Some(fp) => {
+                // 预留一份给 FingerprintMismatch 回退的 connect_tofu
+                let cfg_for_tofu = cfg.clone();
+                match P2PSession::connect(addr, fp, identity(), current_device_id(), cfg).await {
+                    Ok(s) => s,
+                    Err(hyx_core::Error::FingerprintMismatch) => {
+                        // peer 换了 identity → 回退 TOFU 重新信任新指纹
+                        match P2PSession::connect_tofu(
+                            addr,
+                            identity(),
+                            current_device_id(),
+                            cfg_for_tofu,
+                        )
+                        .await
+                        {
+                            Ok(s) => {
+                                // 回传新指纹给 Dart 缓存，覆盖旧指纹
+                                emit_peer_fingerprint_cached(
+                                    &sink_clone,
+                                    encode_fingerprint_hex(&s.peer_fingerprint()),
+                                );
+                                s
+                            }
+                            Err(e) => {
+                                emit_final(
+                                    &sink_clone,
+                                    RsTransferStatus::Failed,
+                                    Some(e.to_string()),
+                                    RsTransferDirection::Send,
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        emit_final(
+                            &sink_clone,
+                            RsTransferStatus::Failed,
+                            Some(e.to_string()),
+                            RsTransferDirection::Send,
+                        );
+                        return;
+                    }
+                }
+            }
+            None => match P2PSession::connect_tofu(addr, identity(), current_device_id(), cfg).await
+            {
+                Ok(s) => {
+                    // TOFU 首次信任 → 回传实际指纹给 Dart 缓存
+                    emit_peer_fingerprint_cached(
+                        &sink_clone,
+                        encode_fingerprint_hex(&s.peer_fingerprint()),
+                    );
+                    s
+                }
                 Err(e) => {
                     emit_final(
                         &sink_clone,
@@ -407,7 +567,10 @@ pub fn connect(
                     );
                     return;
                 }
-            };
+            },
+        };
+
+        // ---- 阶段 3：发送文件 ----
         let res = send_path(&mut session, &path, &sink_clone).await;
         match res {
             Ok(()) => emit_final(
@@ -560,6 +723,7 @@ pub fn pair_rendezvous(
             speed: 0.0,
             status: RsTransferStatus::Pairing,
             message: None,
+            peer_fingerprint: None,
         });
 
         let rv = match P2PSession::resolve_peer_addr(&server_o, port_u16).await {
@@ -658,6 +822,7 @@ pub fn pair_send(
             speed: 0.0,
             status: RsTransferStatus::Pairing,
             message: None,
+            peer_fingerprint: None,
         });
 
         let rv = match P2PSession::resolve_peer_addr(&server_o, port_u16).await {
