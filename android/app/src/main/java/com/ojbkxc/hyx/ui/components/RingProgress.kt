@@ -2,6 +2,7 @@ package com.ojbkxc.hyx.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -25,7 +26,7 @@ fun RingProgress(
     progressThickness: Dp = 10.dp
 ) {
     val animated by animateFloatAsState(targetValue = progress.coerceIn(0f, 1f))
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.size(size)) {
         val strokeWidth = progressThickness.toPx()
         val gap = 3.dp.toPx()
         val radius = (size.toPx() - strokeWidth) / 2f - gap
