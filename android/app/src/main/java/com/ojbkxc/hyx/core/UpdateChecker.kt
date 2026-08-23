@@ -96,16 +96,16 @@ object UpdateChecker {
      * 不再回退到 GitHub —— 避免自定义下载站说"已是最新"但 GitHub 的
      * prerelease 又弹窗提示更新的问题。
      */
-    private fun checkCustomDownloadSite(currentVersion: String): kotlin.util.Result<UpdateInfo?> {
+    private fun checkCustomDownloadSite(currentVersion: String): Result<UpdateInfo?> {
         val raw = httpGet("$CUSTOM_BASE_URL/latest.json")
-            ?: return kotlin.util.Result.failure(Exception("自定义下载站不可达"))
+            ?: return Result.failure(Exception("自定义下载站不可达"))
         val data = JSONObject(raw)
         val version = data.optString("version")
-        if (version.isEmpty()) return kotlin.util.Result.failure(Exception("version 字段为空"))
+        if (version.isEmpty()) return Result.failure(Exception("version 字段为空"))
 
         // 版本不比当前新 → 检测成功，无需更新
         if (compareVersions(version, currentVersion) <= 0) {
-            return kotlin.util.Result.success(null)
+            return Result.success(null)
         }
 
         // 解析下载链接：优先 downloadUrl，回退到 files[platformKey]
@@ -118,7 +118,7 @@ object UpdateChecker {
             val fileName = files?.optString(platformKey, "") ?: ""
             if (fileName.isNotEmpty()) "$CUSTOM_BASE_URL/$fileName" else ""
         }
-        if (resolvedUrl.isEmpty()) return kotlin.util.Result.failure(Exception("无法解析下载链接"))
+        if (resolvedUrl.isEmpty()) return Result.failure(Exception("无法解析下载链接"))
 
         // 解析发行说明：优先 releaseNotes，回退到 body
         val releaseNotes = when {
@@ -127,7 +127,7 @@ object UpdateChecker {
             else -> ""
         }
 
-        return kotlin.util.Result.success(
+        return Result.success(
             UpdateInfo(
                 version = version,
                 downloadUrl = resolvedUrl,
