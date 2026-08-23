@@ -84,6 +84,7 @@ class HyXCoreController : ViewModel() {
 
     init {
         try {
+            android.util.Log.d("R", "init")
             loadSeedHistory()
             // Restore persisted devices (historical) before scanning so the 设备
             // tab shows both sections from the first frame.
@@ -107,6 +108,7 @@ class HyXCoreController : ViewModel() {
      * 仅在 Idle 时启动。发送期间 [direction] 强制为 Send。
      */
     fun startLanSend(peerAddress: String, filePath: String, cachedFingerprint: String?) {
+        android.util.Log.d("R", "startLanSend")
         if (_status.value != TransferStatus.Idle) return
         _direction.value = TransferDirection.Send
         _status.value = TransferStatus.Connecting
@@ -156,6 +158,7 @@ class HyXCoreController : ViewModel() {
      * 若无匹配 address（如对端不在已发现列表），静默忽略——下次 discover 会捡到。
      */
     fun updateDeviceFingerprint(address: String, fingerprint: String) {
+        android.util.Log.d("R", "updateDeviceFingerprint")
         if (address.isBlank() || fingerprint.isBlank()) return
         val updated = _devices.value.map {
             if (it.address == address && it.fingerprint != fingerprint) {
@@ -173,14 +176,17 @@ class HyXCoreController : ViewModel() {
     }
 
     fun onDirectionChange(d: TransferDirection) {
+        android.util.Log.d("R", "onDirectionChange")
         _direction.value = d
     }
 
     fun updateSettings(transform: (EngineSettings) -> EngineSettings) {
+        android.util.Log.d("R", "updateSettings")
         _settings.value = transform(_settings.value)
     }
 
     fun selectFiles(names: List<String>) {
+        android.util.Log.d("R", "selectFiles")
         _progress.value = TransferProgress(
             name = names.take(1).firstOrNull() ?: "文件",
             direction = _direction.value,
@@ -204,6 +210,7 @@ class HyXCoreController : ViewModel() {
      * 用户主动 [cancelTransfer] 会清 _autoListening 停止自动监听。
      */
     fun startAutoListen() {
+        android.util.Log.d("R", "startAutoListen")
         if (!HyXNative.isLoaded) return
         // 仅在 Idle 时启动：避免与正在进行的传输冲突。
         if (_status.value != TransferStatus.Idle) return
@@ -247,6 +254,7 @@ class HyXCoreController : ViewModel() {
     }
 
     fun cancelTransfer() {
+        android.util.Log.d("R", "cancelTransfer")
         cancelled = true
         // 用户主动取消时停止自动监听（避免取消后又自动重启接收）。
         _autoListening.value = false
@@ -266,6 +274,7 @@ class HyXCoreController : ViewModel() {
     }
 
     fun startDiscovery() {
+        android.util.Log.d("R", "startDiscovery")
         _devicesScanning.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -286,6 +295,7 @@ class HyXCoreController : ViewModel() {
 
     /** Parse one `name\tip:port\tdevice_id` discovery line into a [Device]. */
     private fun parsePeerLine(line: String): Device? {
+        android.util.Log.d("R", "parsePeerLine")
         val parts = line.split('\t')
         if (parts.size < 3) return null
         val id = parts[2]
@@ -303,6 +313,7 @@ class HyXCoreController : ViewModel() {
     /** Online devices merge into the persisted list; peers not seen this scan
      *  drop out of 在线设备 and surface as 历史设备 (kept for deletion/拒收). */
     private fun mergeDevices(currentOnline: List<Device>) {
+        android.util.Log.d("R", "mergeDevices")
         val onlineIds = currentOnline.map { it.id }.toSet()
         val history = _devices.value
             .filter { !onlineIds.contains(it.id) }
@@ -323,6 +334,7 @@ class HyXCoreController : ViewModel() {
 
     /** Flip the 接收/禁止 toggle for a device and persist the choice. */
     fun toggleAllowTransfer(id: String) {
+        android.util.Log.d("R", "toggleAllowTransfer")
         _devices.value = _devices.value.map {
             if (it.id == id) it.copy(allowTransfer = !it.allowTransfer) else it
         }
@@ -331,6 +343,7 @@ class HyXCoreController : ViewModel() {
 
     /** Forget a historical device (removes it from storage and the list). */
     fun removeHistoryDevice(id: String) {
+        android.util.Log.d("R", "removeHistoryDevice")
         _devices.value = _devices.value.filterNot { it.id == id }
         persistDevices(_devices.value)
     }
@@ -346,8 +359,9 @@ class HyXCoreController : ViewModel() {
     private fun devicePrefs(): SharedPreferences? =
         HyXNative.appContext?.getSharedPreferences(DEV_STORE, Context.MODE_PRIVATE)
 
-    private fun loadStoredDevices(): List<Device> =
-        devicePrefs()?.getString(DEV_KEY, null)
+    private fun loadStoredDevices(): List<Device> {
+        android.util.Log.d("R", "loadStoredDevices")
+        return devicePrefs()?.getString(DEV_KEY, null)
             ?.lineSequence()
             ?.mapNotNull { l ->
                 val p = l.split('\t')
@@ -366,13 +380,16 @@ class HyXCoreController : ViewModel() {
             }
             ?.toList()
             ?: emptyList()
+    }
 
     private fun storedAllowTransfer(id: String): Boolean {
+        android.util.Log.d("R", "storedAllowTransfer")
         val entry = loadStoredDevices().firstOrNull { it.id == id } ?: return true
         return entry.allowTransfer
     }
 
     private fun persistDevices(devices: List<Device>) {
+        android.util.Log.d("R", "persistDevices")
         val raw = devices.joinToString("\n") {
             "${it.id}\t${it.name}\t${it.address.orEmpty()}\t${if (it.allowTransfer) "1" else "0"}\t${it.fingerprint.orEmpty()}"
         }
@@ -386,6 +403,7 @@ class HyXCoreController : ViewModel() {
      * export keeps its source so the user doesn't lose data.
      */
     private fun exportReceivedToDownloads() {
+        android.util.Log.d("R", "exportReceivedToDownloads")
         val ctx = HyXNative.appContext ?: return
         val staging = File(HyXNative.receiveDir.ifEmpty { return })
         if (!staging.exists()) return
@@ -432,6 +450,7 @@ class HyXCoreController : ViewModel() {
     }.getOrDefault(false)
 
     private fun nudgeStatusToTransferring() {
+        android.util.Log.d("R", "nudgeStatusToTransferring")
         viewModelScope.launch {
             delay(500)
             if (_status.value == TransferStatus.Connecting || _status.value == TransferStatus.Pairing) {
@@ -442,6 +461,7 @@ class HyXCoreController : ViewModel() {
     }
 
     private fun recordProgress(phase: Int, transferred: Long, total: Long, speed: Long) {
+        android.util.Log.d("R", "recordProgress")
         if (cancelled) return
         // 自动监听接收时 transferStartedMs 未在 startAutoListen 里设置（保持 Idle 不设状态），
         // 首次收到 transferring 事件时补上，确保 UI 能正确计算耗时。
@@ -471,6 +491,7 @@ class HyXCoreController : ViewModel() {
      *  Idle reset the status sticks at Completed, and new transfers (which
      *  require Idle) would silently refuse to start. */
     private fun markCompleted() {
+        android.util.Log.d("R", "markCompleted")
         _status.value = TransferStatus.Completed
         recordFinished(TransferStatus.Completed)
         _progress.value = null
@@ -484,6 +505,7 @@ class HyXCoreController : ViewModel() {
 
     /** Standalone demo path for when libhyx_mobile.so isn't built. */
     private fun simulateTransfer() {
+        android.util.Log.d("R", "simulateTransfer")
         val total = 42L * 1024 * 1024
         transferJob = viewModelScope.launch {
             var done = 0L
@@ -497,6 +519,7 @@ class HyXCoreController : ViewModel() {
     }
 
     private fun recordFinished(status: TransferStatus) {
+        android.util.Log.d("R", "recordFinished")
         _history.value = listOf(
             HistoryRecord(
                 id = System.nanoTime().toString(),
@@ -512,6 +535,7 @@ class HyXCoreController : ViewModel() {
     }
 
     private fun failTransfer(msg: String) {
+        android.util.Log.d("R", "failTransfer")
         _status.value = TransferStatus.Failed
         recordFinished(TransferStatus.Failed)
         _progress.value = null
@@ -528,11 +552,13 @@ class HyXCoreController : ViewModel() {
      * copyToCache). Without this the cache grows unbounded across sends.
      */
     private fun cleanupSendCache() {
+        android.util.Log.d("R", "cleanupSendCache")
         val ctx = HyXNative.appContext ?: return
         File(ctx.cacheDir, "hyx_send").listFiles()?.forEach { runCatching { it.delete() } }
     }
 
     private fun loadSeedHistory() {
+        android.util.Log.d("R", "loadSeedHistory")
         _history.value = listOf(
             HistoryRecord("h1", "设计稿.zip", TransferDirection.Send, TransferStatus.Completed, 2048L * 1024 * 1024, "192.168.1.44", 18, System.currentTimeMillis()),
             HistoryRecord("h2", "演唱会视频.mp4", TransferDirection.Receive, TransferStatus.Completed, 6L * 1024 * 1024 * 1024, "192.168.1.98", 340, System.currentTimeMillis() - 3_600_000L),
@@ -541,6 +567,7 @@ class HyXCoreController : ViewModel() {
     }
 
     override fun onCleared() {
+        android.util.Log.d("R", "onCleared")
         transferJob?.cancel()
         if (_status.value in setOf(TransferStatus.Connecting, TransferStatus.Pairing, TransferStatus.Transferring)) {
             // cancel() only aborts the coroutine; a transfer currently blocked

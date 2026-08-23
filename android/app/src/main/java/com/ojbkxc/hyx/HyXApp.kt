@@ -12,6 +12,7 @@ class HyXApp : Application() {
     override fun onCreate() {
         super.onCreate()
         try {
+            android.util.Log.d("R", "HyXApp.onCreate")
             val incoming = File(filesDir, "incoming").apply { mkdirs() }
             HyXNative.appContext = this
             HyXNative.appFilesDir = filesDir.absolutePath
@@ -43,6 +44,7 @@ class HyXApp : Application() {
      * 在 Android 上的必备操作。
      */
     private fun acquireMulticastLock() {
+        android.util.Log.d("R", "acquireMulticastLock")
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             val lock = wifiManager.createMulticastLock("HyXDiscovery")

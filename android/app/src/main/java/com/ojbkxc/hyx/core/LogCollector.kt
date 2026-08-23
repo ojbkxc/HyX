@@ -28,6 +28,7 @@ object LogCollector {
 
     /** Append [entry]; if the buffer is full the oldest entry is evicted. */
     fun add(entry: LogEntry) {
+        android.util.Log.d("R", "LogCollector.add")
         _logs.update { (it + entry).takeLast(MAX_ENTRIES) }
     }
 
@@ -44,6 +45,7 @@ object LogCollector {
      * so `LogCollector::onRustLog` can be passed directly to `hyxSetLogCallback`.
      */
     fun onRustLog(level: Int, tag: String, message: String) {
+        android.util.Log.d("R", "LogCollector.onRustLog")
         add(
             LogEntry(
                 timestamp = System.currentTimeMillis(),
