@@ -46,7 +46,7 @@ impl DiscoveryService {
         sock.set_broadcast(true)?;
         sock.bind(&SockAddr::from(bind_addr))?;
         let std_socket: std::net::UdpSocket = sock.into();
-        let socket = tokio::net::UdpSocket::from_std(std_socket);
+        let socket = tokio::net::UdpSocket::from_std(std_socket)?;
 
         let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), discovery_port);
 
