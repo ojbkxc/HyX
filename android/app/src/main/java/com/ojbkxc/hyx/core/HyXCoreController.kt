@@ -56,6 +56,12 @@ class HyXCoreController : ViewModel() {
     private val _settings = MutableStateFlow(EngineSettings())
     val settings: StateFlow<EngineSettings> = _settings.asStateFlow()
 
+    // 自动监听模式标志：应用启动即自动监听接收，传输完成后自动重启监听。
+    // 对齐 Flutter app 的 StartAutoListenAction / _UpdateProgressAction。
+    // 不加全局开关：per-device allowTransfer 白名单已在 Rust 侧拒收未授权设备。
+    private val _autoListening = MutableStateFlow(false)
+    val autoListening: StateFlow<Boolean> = _autoListening.asStateFlow()
+
     // Speed of progress updates is throttled by the Rust side; no EMA here yet.
     private var transferJob: Job? = null
     private var transferStartedMs = 0L
@@ -85,6 +91,9 @@ class HyXCoreController : ViewModel() {
         // tab shows both sections from the first frame.
         _devices.value = loadStoredDevices()
         startDiscovery()
+        // 自动监听接收：应用启动即监听 14567 端口，对齐 Flutter app 的 StartAutoListenAction。
+        // 传输完成后自动重启监听（持续接收），无需用户手动切接收模式 + 点开始接收。
+        startAutoListen()
     }
 
     /**
@@ -306,8 +315,62 @@ class HyXCoreController : ViewModel() {
         }
     }
 
+    /**
+     * 启动自动监听接收（应用启动时调用，对齐 Flutter app 的 StartAutoListenAction）。
+     *
+     * 与 [startTransfer] 的区别：
+     * - 不把状态设为 Connecting，保持 Idle，避免 UI 误判为忙态；这样 [startLanSend] /
+     *   [startPairing] 仍能在 Idle 时启动发送（发送用 connect 不占 listener 端口）。
+     * - 设 [autoListening]=true，传输完成后自动重启监听（持续接收）。
+     * - 端口冲突或其他错误时停止自动监听，不弹失败 UI（自动监听失败不该打扰用户）。
+     *
+     * 收到连接后 [recordProgress] 会把 _status 设为 Transferring 并补上 transferStartedMs。
+     * 用户主动 [cancelTransfer] 会清 _autoListening 停止自动监听。
+     */
+    fun startAutoListen() {
+        if (!HyXNative.isLoaded) return
+        // 仅在 Idle 时启动：避免与正在进行的传输冲突。
+        if (_status.value != TransferStatus.Idle) return
+        _autoListening.value = true
+        // 不设 _status = Connecting，保持 Idle（对齐 Flutter app）。
+        cancelled = false
+        val cfg = _settings.value
+        transferJob = viewModelScope.launch(Dispatchers.IO) {
+            val err = HyXNative.hyxStartListener(
+                port = 14567,
+                chunkBytes = 1_048_576,
+                fsyncEveryBytes = cfg.fsyncEveryBytes,
+                compression = if (cfg.compression) 1 else 0,
+                aggregation = if (cfg.aggregation) 1 else 0,
+                saveDir = HyXNative.receiveDir,
+                onProgress = simpleProgressCb
+            )
+            if (cancelled) return@launch
+            if (err.isNullOrEmpty()) {
+                markCompleted()
+                exportReceivedToDownloads()
+                // 自动监听模式下，传输完成后重启监听（持续接收）。
+                if (_autoListening.value) {
+                    viewModelScope.launch {
+                        // 等 markCompleted 的 1.5s delay 完成后重启，避免 _status 还是
+                        // Completed 时被 startAutoListen 的 Idle 检查阻止。
+                        delay(1600)
+                        if (_autoListening.value && _status.value == TransferStatus.Idle) {
+                            startAutoListen()
+                        }
+                    }
+                }
+            } else {
+                // 端口冲突或其他错误：停止自动监听，不弹失败 UI（自动监听失败不该打扰用户）。
+                _autoListening.value = false
+            }
+        }
+    }
+
     fun cancelTransfer() {
         cancelled = true
+        // 用户主动取消时停止自动监听（避免取消后又自动重启接收）。
+        _autoListening.value = false
         viewModelScope.launch(Dispatchers.IO) { HyXNative.hyxCancel() }
         _status.value = TransferStatus.Cancelled
         recordFinished(TransferStatus.Cancelled)
@@ -496,6 +559,12 @@ class HyXCoreController : ViewModel() {
 
     private fun recordProgress(phase: Int, transferred: Long, total: Long, speed: Long) {
         if (cancelled) return
+        // 自动监听接收时 transferStartedMs 未在 startAutoListen 里设置（保持 Idle 不设状态），
+        // 首次收到 transferring 事件时补上，确保 UI 能正确计算耗时。
+        // 对齐 Flutter app 的 _UpdateProgressAction（shouldSetStart 逻辑）。
+        if (_status.value == TransferStatus.Idle) {
+            transferStartedMs = System.currentTimeMillis()
+        }
         val elapsed = System.currentTimeMillis() - transferStartedMs
         _status.value = TransferStatus.Transferring
         _progress.value = TransferProgress(
