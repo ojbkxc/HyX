@@ -1,11 +1,11 @@
 import 'dart:async';
 
 import 'package:hyx_app/provider/device_provider.dart';
+import 'package:hyx_app/util/native/directories.dart';
 import 'package:hyx_app/util/transfer_direction.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:hyx_isolates/rust/api/transfer.dart' as rust_transfer;
 import 'package:logging/logging.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 
 final _logger = Logger('TransferProvider');
@@ -144,7 +144,7 @@ class TransferService extends ReduxNotifier<TransferState> {
 /// 启动监听接收（手动模式，UI 显示"连接中"状态）。
 ///
 /// 对应 Rust `start_listener`：绑定 `port` + 接收对端文件到 `saveDir`。
-/// `saveDir` 为空时使用 `getApplicationDocumentsDirectory()/hyx_received`。
+/// `saveDir` 为空时使用系统 Downloads 目录（跨平台）。
 class StartReceiveAction extends AsyncReduxAction<TransferService, TransferState> {
   final int port;
   final int chunkBytes;
@@ -413,13 +413,16 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
   }
 }
 
+/// 默认接收目录：Downloads 文件夹（跨平台）。
+///
+/// 对齐 localsend：Android 用 Method Channel 获取系统 Downloads，
+/// 桌面端用 `path.getDownloadsDirectory()`，回退到 `$HOME/Downloads`。
+/// 详见 [getDefaultDownloadDirectory]。
 Future<String> _defaultSaveDir() async {
   try {
-    final base = await getApplicationDocumentsDirectory();
-    final dir = '${base.path}/hyx_received';
-    return dir;
+    return await getDefaultDownloadDirectory();
   } catch (e) {
-    _logger.warning('getApplicationDocumentsDirectory failed: $e');
+    _logger.warning('getDefaultDownloadDirectory failed: $e');
     return './hyx_received';
   }
 }
