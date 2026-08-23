@@ -384,7 +384,9 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
     // 非 null 且非空 → 本次走了 TOFU 路径，把指纹缓存到匹配的 KnownDevice，
     // 后续连接直接 pin 跳过 UDP 发现。通过 peerAddress 关联已知设备。
     if (event.peerFingerprint != null && event.peerFingerprint!.isNotEmpty) {
-      unawaited(notifier._deviceService.dispatchAsync(
+      // 用 external() 包裹跨 notifier 调用，避免 invalid_use_of_internal_member0
+      // （refena_flutter 的 dispatchAsync 是 @internal，external() 解除该限制）
+      unawaited(external(notifier._deviceService).dispatchAsync(
         UpdateDeviceFingerprintByAddrAction(state.peerAddress, event.peerFingerprint!),
       ));
     }
