@@ -154,6 +154,19 @@ jobs:
       - name: 安装 Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: 注入版本号（与 pubspec.yaml 同步）
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        working-directory: android
+        run: |
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+          VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))
+          echo "注入 versionName=$VERSION, versionCode=$VERSION_CODE"
+          sed -i "s/versionCode = [0-9]*/versionCode = $VERSION_CODE/" app/build.gradle.kts
+          sed -i "s/versionName = \"[0-9.]*\"/versionName = \"$VERSION\"/" app/build.gradle.kts
+
       - name: 构建 APK 轻量版
         working-directory: android
         run: gradle assembleRelease --no-daemon

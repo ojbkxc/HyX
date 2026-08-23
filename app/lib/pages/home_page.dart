@@ -13,6 +13,7 @@ import 'package:hyx_app/provider/transfer_provider.dart';
 import 'package:hyx_app/util/update_checker.dart';
 import 'package:hyx_app/widget/device_card.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 
 /// HyX 主页面。
@@ -312,10 +313,11 @@ class _HomePageState extends State<HomePage> with Refena {
   /// 检测应用更新，发现新版本时弹窗提示。
   ///
   /// 检测顺序：优先 R2 下载站 latest.json，回退到 GitHub Releases。
-  /// 当前版本号先硬编码 '1.0.0'，后续可改为从 pubspec 读取。
+  /// 当前版本号通过 package_info_plus 动态获取，与打包版本一致。
   Future<void> _checkForUpdate() async {
     try {
-      final info = await UpdateChecker.check('1.0.0');
+      final packageInfo = await PackageInfo.fromPlatform();
+      final info = await UpdateChecker.check(packageInfo.version);
       if (info != null && mounted) {
         unawaited(showDialog(
           context: context,
