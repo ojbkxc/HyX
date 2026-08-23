@@ -35,6 +35,8 @@ hyx-rendezvous = { path = "../rendezvous" }
 
 # UDP 发现端口需要 SO_REUSEADDR，避免监听 + 发送同时绑定 14566 时端口冲突。
 socket2 = "0.5"
+# 枚举网络接口，用于 UDP 多播 join_multicast_v4 时挑选合适的发送接口。
+if-addrs = "0.13"
 
 [dev-dependencies]
 tokio-test = "0.4"
