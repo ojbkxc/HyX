@@ -594,6 +594,11 @@ jobs:
         working-directory: app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
+      - name: 注入 Windows 图标
+        run: |
+          New-Item -ItemType Directory -Force -Path app/windows/runner/resources
+          Copy-Item support/icons/app_icon.ico app/windows/runner/resources/app_icon.ico
+
       - name: 依赖
         working-directory: app
         run: flutter pub get
@@ -659,6 +664,11 @@ jobs:
       - name: 生成平台配置
         working-directory: app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
+      - name: 注入 Windows 图标
+        run: |
+          New-Item -ItemType Directory -Force -Path app/windows/runner/resources
+          Copy-Item support/icons/app_icon.ico app/windows/runner/resources/app_icon.ico
 
       - name: 依赖
         working-directory: app
@@ -734,6 +744,38 @@ jobs:
       - name: 生成平台配置
         working-directory: app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
+      - name: 注入 macOS 图标
+        run: |
+          ICONSET_DIR="app/macos/Runner/Assets.xcassets/AppIcon.appiconset"
+          mkdir -p "$ICONSET_DIR"
+          cp support/icons/macos-16.png "$ICONSET_DIR/icon_16x16.png"
+          cp support/icons/macos-32.png "$ICONSET_DIR/icon_16x16@2x.png"
+          cp support/icons/macos-32.png "$ICONSET_DIR/icon_32x32.png"
+          cp support/icons/macos-64.png "$ICONSET_DIR/icon_32x32@2x.png"
+          cp support/icons/macos-128.png "$ICONSET_DIR/icon_128x128.png"
+          cp support/icons/macos-256.png "$ICONSET_DIR/icon_128x128@2x.png"
+          cp support/icons/macos-256.png "$ICONSET_DIR/icon_256x256.png"
+          cp support/icons/macos-512.png "$ICONSET_DIR/icon_256x256@2x.png"
+          cp support/icons/macos-512.png "$ICONSET_DIR/icon_512x512.png"
+          cp support/icons/macos-1024.png "$ICONSET_DIR/icon_512x512@2x.png"
+          cat > "$ICONSET_DIR/Contents.json" <<'JSON'
+          {
+            "images" : [
+              {"size" : "16x16", "idiom" : "mac", "filename" : "icon_16x16.png", "scale" : "1x"},
+              {"size" : "16x16", "idiom" : "mac", "filename" : "icon_16x16@2x.png", "scale" : "2x"},
+              {"size" : "32x32", "idiom" : "mac", "filename" : "icon_32x32.png", "scale" : "1x"},
+              {"size" : "32x32", "idiom" : "mac", "filename" : "icon_32x32@2x.png", "scale" : "2x"},
+              {"size" : "128x128", "idiom" : "mac", "filename" : "icon_128x128.png", "scale" : "1x"},
+              {"size" : "128x128", "idiom" : "mac", "filename" : "icon_128x128@2x.png", "scale" : "2x"},
+              {"size" : "256x256", "idiom" : "mac", "filename" : "icon_256x256.png", "scale" : "1x"},
+              {"size" : "256x256", "idiom" : "mac", "filename" : "icon_256x256@2x.png", "scale" : "2x"},
+              {"size" : "512x512", "idiom" : "mac", "filename" : "icon_512x512.png", "scale" : "1x"},
+              {"size" : "512x512", "idiom" : "mac", "filename" : "icon_512x512@2x.png", "scale" : "2x"}
+            ],
+            "info" : {"version" : 1, "author" : "xcode"}
+          }
+          JSON
 
       - name: 依赖
         working-directory: app
