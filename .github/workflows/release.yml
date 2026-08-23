@@ -210,6 +210,11 @@ jobs:
         working-directory: app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
+      - name: 注入 Linux 图标
+        run: |
+          mkdir -p app/linux/flutter/assets/assets
+          cp support/icons/hyx-512.png app/linux/flutter/assets/assets/icon.png
+
       - name: 依赖
         working-directory: app
         run: flutter pub get
@@ -273,6 +278,11 @@ jobs:
         working-directory: app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
+      - name: 注入 Linux 图标
+        run: |
+          mkdir -p app/linux/flutter/assets/assets
+          cp support/icons/hyx-512.png app/linux/flutter/assets/assets/icon.png
+
       - name: 依赖
         working-directory: app
         run: flutter pub get
@@ -334,6 +344,11 @@ jobs:
       - name: 生成平台配置
         working-directory: app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
+      - name: 注入 Linux 图标
+        run: |
+          mkdir -p app/linux/flutter/assets/assets
+          cp support/icons/hyx-512.png app/linux/flutter/assets/assets/icon.png
 
       - name: 启用 flutter_distributor
         run: dart pub global activate flutter_distributor
@@ -415,6 +430,11 @@ jobs:
         working-directory: app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
 
+      - name: 注入 Linux 图标
+        run: |
+          mkdir -p app/linux/flutter/assets/assets
+          cp support/icons/hyx-512.png app/linux/flutter/assets/assets/icon.png
+
       - name: 启用 flutter_distributor
         run: dart pub global activate flutter_distributor
 
@@ -490,6 +510,11 @@ jobs:
       - name: 生成平台配置
         working-directory: app
         run: flutter create --platforms=linux,macos,windows,android,ios --project-name hyx_app --org com.ojbxc .
+
+      - name: 注入 Linux 图标
+        run: |
+          mkdir -p app/linux/flutter/assets/assets
+          cp support/icons/hyx-512.png app/linux/flutter/assets/assets/icon.png
 
       - name: 依赖
         working-directory: app

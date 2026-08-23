@@ -101,28 +101,6 @@ object HyXNative {
         onProgress: ProgressCallback
     ): String?
 
-    /** Rendezvous pairing, then receive the peer's files into [saveDir]. */
-    external fun hyxPairRendezvous(
-        code: String,
-        serverAddress: String,
-        port: Int,
-        compression: Int,
-        saveDir: String,
-        onProgress: ProgressCallback
-    ): String?
-
-    /** Rendezvous pairing, then send [filePath] to the paired peer. Sender
-     *  side of a code/QR share. */
-    external fun hyxPairSend(
-        code: String,
-        serverAddress: String,
-        port: Int,
-        filePath: String,
-        chunkBytes: Int,
-        compression: Int,
-        aggregation: Int,
-        onProgress: ProgressCallback
-    ): String?
 
     external fun hyxCancel(): String?
 
@@ -154,7 +132,7 @@ object HyXNative {
         /**
          * TOFU 连接成功后 Rust 侧回传对端证书 fingerprint（hex 字符串）。
          * Kotlin 侧应在此缓存指纹到对应 Device，下次连接可直接 pin 跳过 UDP 发现。
-         * 默认空实现：不关心 fingerprint 的调用方（如 hyxStartListener/hyxPair*）无需关心。
+         * 默认空实现：不关心 fingerprint 的调用方（如 hyxStartListener）无需关心。
          */
         fun onPeerFingerprint(fingerprint: String) {}
     }

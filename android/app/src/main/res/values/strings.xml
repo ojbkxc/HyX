@@ -10,18 +10,8 @@
     <string name="tab_transfer_title">极速传输</string>
     <string name="mode_send">发送</string>
     <string name="mode_receive">接收</string>
-    <string name="pair_code">配对码</string>
-    <string name="pair_scan">扫码</string>
     <string name="pair_lan">局域网发现</string>
     <string name="pair_share">选择文件，生成配对二维码</string>
-    <string name="pair_scan_receive">扫码接收</string>
-    <string name="pair_input_code">输入配对码</string>
-    <string name="pair_qr_title">让对方扫一扫这个二维码</string>
-    <string name="pair_waiting">正在等待对方配对…</string>
-    <string name="pair_code_placeholder">输入对方展示的配对码</string>
-    <string name="pair_scan_prompt">对准对方的配对二维码</string>
-    <string name="pair_confirm">确定</string>
-    <string name="pair_cancel">取消</string>
     <string name="auto_listening_hint">正在监听 LAN 接收…</string>
 
     <!-- Logs -->
@@ -36,9 +26,6 @@
     <string name="log_empty">暂无日志</string>
     <string name="log_filter_all">全部</string>
 
-    <!-- QR code -->
-    <string name="qr_pair_hint">用另一台手机扫码即可配对</string>
-    <string name="qr_scan_prompt">将对方手机的配对码二维码对准取景框</string>
 
     <string name="send_files_label">选择文件并发给设备</string>
 
@@ -73,7 +60,7 @@
     <string name="devices_count">共 %1$d 台设备</string>
     <string name="via_lan">局域网</string>
     <string name="via_rendezvous">配对码</string>
-    <string name="connected_via_pair">经配对码连接</string>
+
     <string name="online_devices">在线设备</string>
     <string name="history_devices">历史设备</string>
     <string name="device_count">%1$d 台</string>

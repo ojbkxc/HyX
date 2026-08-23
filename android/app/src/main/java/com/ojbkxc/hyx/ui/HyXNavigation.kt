@@ -34,7 +34,7 @@ enum class HyXTab(val route: String, val icon: ImageVector, val labelRes: Int) {
 }
 
 @Composable
-fun HyXNavigation(controller: HyXCoreController, onScanQr: () -> Unit, onEnterCode: (String) -> Unit) {
+fun HyXNavigation(controller: HyXCoreController) {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val currentDestination = backStack?.destination
@@ -66,7 +66,7 @@ fun HyXNavigation(controller: HyXCoreController, onScanQr: () -> Unit, onEnterCo
             modifier = Modifier.padding(padding)
         ) {
             composable(HyXTab.Transfer.route) {
-                TransferScreen(controller, onScan = onScanQr, onEnterCode = onEnterCode)
+                TransferScreen(controller)
             }
             composable(HyXTab.Devices.route) { DevicesScreen(controller) }
             composable(HyXTab.History.route) { HistoryScreen(controller) }

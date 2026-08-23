@@ -182,7 +182,7 @@ private fun OnlineDeviceCard(device: Device, onToggle: () -> Unit, onSend: () ->
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    device.address ?: stringResource(R.string.connected_via_pair),
+                    device.address ?: "",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -226,7 +226,7 @@ private fun HistoryDeviceCard(device: Device, onToggle: () -> Unit, onDelete: ()
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    device.address ?: stringResource(R.string.connected_via_pair),
+                    device.address ?: "",
                     fontSize = 12.sp,
                     color = dim
                 )

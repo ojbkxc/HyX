@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Rounded bolt mark, minimal geometric identity for HyX.
+         Scaled 1.5× from original (20×40 → 30×60 dp) to fill more of the
+         adaptive-icon safe zone (center 72dp of 108dp viewport). Centered at (54,54). -->
+    <path
+        android:fillColor="#22C55E"
+        android:pathData="M63,24 L39,60 L54,60 L45,84 L69,48 L54,48 Z" />
+</vector>

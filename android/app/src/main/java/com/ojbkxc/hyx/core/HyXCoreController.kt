@@ -12,7 +12,7 @@ import com.ojbkxc.hyx.ui.components.mimeTypeOf
 import com.ojbkxc.hyx.ui.model.Device
 import com.ojbkxc.hyx.ui.model.EngineSettings
 import com.ojbkxc.hyx.ui.model.HistoryRecord
-import com.ojbkxc.hyx.ui.model.PairingCode
+
 import com.ojbkxc.hyx.ui.model.TransferDirection
 import com.ojbkxc.hyx.ui.model.TransferProgress
 import com.ojbkxc.hyx.ui.model.TransferStatus
@@ -44,8 +44,6 @@ class HyXCoreController : ViewModel() {
     private val _devicesScanning = MutableStateFlow(false)
     val devicesScanning: StateFlow<Boolean> = _devicesScanning.asStateFlow()
 
-    private val _pairingCode = MutableStateFlow<PairingCode?>(null)
-    val pairingCode: StateFlow<PairingCode?> = _pairingCode.asStateFlow()
 
     private val _progress = MutableStateFlow<TransferProgress?>(null)
     val progress: StateFlow<TransferProgress?> = _progress.asStateFlow()
@@ -75,7 +73,7 @@ class HyXCoreController : ViewModel() {
      * 共享的 ProgressCallback 实现，转发到 [recordProgress]。
      * ProgressCallback 改为普通 interface 后（加了 onPeerFingerprint 默认实现），
      * `::recordProgress` 方法引用不再能自动转换，需用 object 表达式。
-     * 此字段用于不关心 fingerprint 的现有调用方（hyxStartListener/hyxPair*）。
+     * 此字段用于不关心 fingerprint 的现有调用方（hyxStartListener）。
      * 关心 fingerprint 的 [startLanSend] 自己构造带 onPeerFingerprint 覆盖的 callback。
      */
     private val simpleProgressCb = object : HyXNative.ProgressCallback {
@@ -83,7 +81,6 @@ class HyXCoreController : ViewModel() {
             recordProgress(phase, transferred, total, speed)
     }
 
-    private val pairAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
     init {
         try {
@@ -107,7 +104,7 @@ class HyXCoreController : ViewModel() {
      *  - [cachedFingerprint] 空 → Rust 侧走 TOFU，成功后通过 onPeerFingerprint 回传
      *    实际指纹，此处缓存到对应 Device 以便下次 pin。
      *
-     * 与 [startPairing] 互斥：仅在 Idle 时启动。发送期间 [direction] 强制为 Send。
+     * 仅在 Idle 时启动。发送期间 [direction] 强制为 Send。
      */
     fun startLanSend(peerAddress: String, filePath: String, cachedFingerprint: String?) {
         if (_status.value != TransferStatus.Idle) return
@@ -170,102 +167,7 @@ class HyXCoreController : ViewModel() {
         persistDevices(updated)
     }
 
-    /** Sender side of the simplest match: generate a fresh code, surface it as
-     *  a QR for the peer to scan, then wait on the rendezvous server for them
-     *  to dial in and receive [filePath]. */
-    fun startPairing(filePath: String) {
-        if (_status.value != TransferStatus.Idle) return
-        // 用户点"分享"隐式决定方向为发送，Pairing 阶段据此显示二维码卡片。
-        _direction.value = TransferDirection.Send
-        val code = generatePairingCode()
-        _pairingCode.value = PairingCode(code, System.currentTimeMillis() + PAIR_CODE_TTL_MS)
-        _status.value = TransferStatus.Pairing
-        if (!HyXNative.isLoaded) {
-            nudgeStatusToTransferring()
-            return
-        }
-        cancelled = false
-        transferStartedMs = System.currentTimeMillis()
-        val cfg = _settings.value
-        _progress.value = TransferProgress(
-            name = filePath.substringAfterLast('/').ifEmpty { "文件" },
-            direction = _direction.value,
-            transferredBytes = 0,
-            totalBytes = 0,
-            speedBps = 0.0,
-            elapsedMs = 0
-        )
-        transferJob = viewModelScope.launch(Dispatchers.IO) {
-            val err = HyXNative.hyxPairSend(
-                code = code,
-                serverAddress = RENDEZVOUS_SERVER,
-                port = RENDEZVOUS_PORT,
-                filePath = filePath,
-                chunkBytes = 1_048_576,
-                compression = if (cfg.compression) 1 else 0,
-                aggregation = if (cfg.aggregation) 1 else 0,
-                onProgress = simpleProgressCb
-            )
-            if (cancelled) return@launch
-            if (err.isNullOrEmpty()) markCompleted() else failTransfer(err)
-        }
-    }
-
-    /** Receiver side: dial into the rendezvous room identified by [code] and
-     *  receive into the staging dir. [code] may be a bare code, a `hyx://CODE`
-     *  QR payload, or a `/CODE` path. */
-    fun pairWithCode(code: String) {
-        val clean = linkCode(code)
-        if (clean.isEmpty()) return
-        // 用户扫码/输码隐式决定方向为接收，Pairing 阶段据此显示等待卡片。
-        _direction.value = TransferDirection.Receive
-        _pairingCode.value = PairingCode(clean, System.currentTimeMillis() + PAIR_CODE_TTL_MS)
-        _status.value = TransferStatus.Pairing
-        if (HyXNative.isLoaded) {
-            cancelled = false
-            transferStartedMs = System.currentTimeMillis()
-            transferJob = viewModelScope.launch(Dispatchers.IO) {
-                val err = HyXNative.hyxPairRendezvous(
-                    code = clean,
-                    serverAddress = RENDEZVOUS_SERVER,
-                    port = RENDEZVOUS_PORT,
-                    compression = if (_settings.value.compression) 1 else 0,
-                    saveDir = HyXNative.receiveDir,
-                    onProgress = simpleProgressCb
-                )
-                if (cancelled) return@launch
-                if (err.isNullOrEmpty()) {
-                    markCompleted()
-                    exportReceivedToDownloads()
-                } else {
-                    failTransfer(err)
-                }
-            }
-        } else {
-            nudgeStatusToTransferring()
-        }
-    }
-
-    /** Parse a QR payload (bare code, `hyx://CODE`, or `/CODE`) into a clean,
-     *  uppercased pairing code. */
-    private fun linkCode(raw: String): String =
-        raw.substringAfterLast('/').trim().uppercase()
-
-    fun scanQr(result: String) = pairWithCode(linkCode(result))
-
-    private fun generatePairingCode(): String = buildString {
-        val rand = java.util.Random()
-        repeat(PAIR_CODE_LEN) {
-            append(pairAlphabet[rand.nextInt(pairAlphabet.length)])
-        }
-    }
-
     companion object {
-        const val RENDEZVOUS_SERVER = "rendezvous.hyx.dev:14567"
-        const val RENDEZVOUS_PORT = 14567
-        const val PAIR_CODE_LEN = 6
-        const val PAIR_CODE_TTL_MS = 300_000L
-
         private const val DEV_STORE = "hyx_device_store"
         private const val DEV_KEY = "devices"
     }
@@ -293,9 +195,8 @@ class HyXCoreController : ViewModel() {
     /**
      * 启动自动监听接收（应用启动时调用，对齐 Flutter app 的 StartAutoListenAction）。
      *
-     * 与 [startTransfer] 的区别：
-     * - 不把状态设为 Connecting，保持 Idle，避免 UI 误判为忙态；这样 [startLanSend] /
-     *   [startPairing] 仍能在 Idle 时启动发送（发送用 connect 不占 listener 端口）。
+     * - 不把状态设为 Connecting，保持 Idle，避免 UI 误判为忙态；这样 [startLanSend]
+     *   仍能在 Idle 时启动发送（发送用 connect 不占 listener 端口）。
      * - 设 [autoListening]=true，传输完成后自动重启监听（持续接收）。
      * - 端口冲突或其他错误时停止自动监听，不弹失败 UI（自动监听失败不该打扰用户）。
      *
@@ -311,38 +212,36 @@ class HyXCoreController : ViewModel() {
         cancelled = false
         val cfg = _settings.value
         transferJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val err = HyXNative.hyxStartListener(
-                    port = 14567,
-                    chunkBytes = 1_048_576,
-                    fsyncEveryBytes = cfg.fsyncEveryBytes,
-                    compression = if (cfg.compression) 1 else 0,
-                    aggregation = if (cfg.aggregation) 1 else 0,
-                    saveDir = HyXNative.receiveDir,
-                    onProgress = simpleProgressCb
-                )
-                if (cancelled) return@launch
-                if (err.isNullOrEmpty()) {
-                    markCompleted()
-                    exportReceivedToDownloads()
-                    // 自动监听模式下，传输完成后重启监听（持续接收）。
-                    if (_autoListening.value) {
-                        viewModelScope.launch {
-                            // 等 markCompleted 的 1.5s delay 完成后重启，避免 _status 还是
-                            // Completed 时被 startAutoListen 的 Idle 检查阻止。
-                            delay(1600)
-                            if (_autoListening.value && _status.value == TransferStatus.Idle) {
-                                startAutoListen()
-                            }
-                        }
+            // 用 while 循环替代递归调用，避免长时间运行导致栈溢出闪退。
+            while (_autoListening.value && !cancelled) {
+                try {
+                    val err = HyXNative.hyxStartListener(
+                        port = 14567,
+                        chunkBytes = 1_048_576,
+                        fsyncEveryBytes = cfg.fsyncEveryBytes,
+                        compression = if (cfg.compression) 1 else 0,
+                        aggregation = if (cfg.aggregation) 1 else 0,
+                        saveDir = HyXNative.receiveDir,
+                        onProgress = simpleProgressCb
+                    )
+                    if (cancelled) break
+                    if (err.isNullOrEmpty()) {
+                        markCompleted()
+                        exportReceivedToDownloads()
+                        // 等 markCompleted 的 1.5s delay 完成后继续下一轮监听，
+                        // 避免 _status 还是 Completed 时被下一轮的 Idle 检查阻止。
+                        delay(1600)
+                    } else {
+                        // 端口冲突或其他错误：停止自动监听，不弹失败 UI
+                        // （自动监听失败不该打扰用户）。
+                        _autoListening.value = false
+                        break
                     }
-                } else {
-                    // 端口冲突或其他错误：停止自动监听，不弹失败 UI（自动监听失败不该打扰用户）。
+                } catch (t: Throwable) {
+                    android.util.Log.e("HyXCoreController", "startAutoListen failed", t)
                     _autoListening.value = false
+                    break
                 }
-            } catch (t: Throwable) {
-                android.util.Log.e("HyXCoreController", "startAutoListen failed", t)
-                _autoListening.value = false
             }
         }
     }
@@ -356,7 +255,7 @@ class HyXCoreController : ViewModel() {
         recordFinished(TransferStatus.Cancelled)
         transferJob?.cancel()
         _progress.value = null
-        _pairingCode.value = null
+
         cleanupSendCache()
         // Hold the Cancelled status briefly before returning to Idle, mirroring
         // failTransfer's 1.5 s hold so the user actually sees the cancellation.
@@ -575,7 +474,7 @@ class HyXCoreController : ViewModel() {
         _status.value = TransferStatus.Completed
         recordFinished(TransferStatus.Completed)
         _progress.value = null
-        _pairingCode.value = null
+
         cleanupSendCache()
         viewModelScope.launch {
             delay(1500)
@@ -616,7 +515,7 @@ class HyXCoreController : ViewModel() {
         _status.value = TransferStatus.Failed
         recordFinished(TransferStatus.Failed)
         _progress.value = null
-        _pairingCode.value = null
+
         cleanupSendCache()
         viewModelScope.launch {
             delay(1500)
