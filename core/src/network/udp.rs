@@ -205,22 +205,20 @@ fn pick_multicast_interface_ipv4() -> Option<Ipv4Addr> {
 
     let mut first_non_loopback: Option<Ipv4Addr> = None;
     for iface in &ifaces {
-        for addr in &iface.addrs {
-            if let if_addrs::IfAddr::V4(v4) = addr {
-                if v4.ip.is_loopback() {
-                    continue;
-                }
-                if first_non_loopback.is_none() {
-                    first_non_loopback = Some(v4.ip);
-                }
-                if !looks_virtual(&iface.name) {
-                    trace!(
-                        "Selected multicast interface {} ({})",
-                        iface.name,
-                        v4.ip
-                    );
-                    return Some(v4.ip);
-                }
+        if let if_addrs::IfAddr::V4(v4) = &iface.addr {
+            if v4.ip.is_loopback() {
+                continue;
+            }
+            if first_non_loopback.is_none() {
+                first_non_loopback = Some(v4.ip);
+            }
+            if !looks_virtual(&iface.name) {
+                trace!(
+                    "Selected multicast interface {} ({})",
+                    iface.name,
+                    v4.ip
+                );
+                return Some(v4.ip);
             }
         }
     }
