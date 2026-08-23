@@ -12,8 +12,21 @@
 //!
 //! UDP 多播（`224.0.0.167`）绕过这个限制：多播是 IGMP 加入的组，AP 会把
 //! 多播包按组转发给所有加入了该组的客户端。参考 localsend 的实现。
+//!
+//! # 为什么每个网络接口一个 socket
+//!
+//! 一个 UDP 多播 socket 只能在一个接口上 `join_multicast_v4` 并 `set_multicast_if_v4`。
+//! 当手机开热点时，手机同时有 WiFi 接口和热点 AP 接口，二者属于不同子网。如果只在
+//! 一个接口上 join 多播组，热点子网上的设备收不到多播包，手机也收不到热点子网上
+//! 设备发的多播包 → 互相都搜索不到。
+//!
+//! 解决办法（参考 LocalSend）：遍历所有合适的网络接口，**每个接口创建一个独立的
+//! socket**，全部 wildcard 绑定 `0.0.0.0:port`（配合 `SO_REUSEADDR`/`SO_REUSEPORT`），
+//! 各自 join 多播组并 pin 到自己的接口。发送时在所有 socket 上都发，接收时任意一个
+//! socket 收到即可。
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -36,7 +49,9 @@ const MAX_PACKET_SIZE: usize = 1500;
 const MULTICAST_GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 167);
 
 pub struct DiscoveryService {
-    socket: UdpSocket,
+    /// 每个网络接口一个多播 socket，全部 wildcard 绑定同一发现端口。
+    /// 发送时在所有 socket 上都发；接收时任意一个收到即可。
+    sockets: Vec<Arc<UdpSocket>>,
     device_id: Uuid,
     device_name: String,
     transfer_port: u16,
@@ -52,63 +67,115 @@ impl DiscoveryService {
         device_id: Uuid,
     ) -> Result<Self> {
         let discovery_port = DEFAULT_DISCOVERY_PORT;
+        // 所有 socket 都 wildcard 绑定 0.0.0.0:port，配合 SO_REUSEADDR/SO_REUSEPORT
+        // 让多个 socket 能同时绑定同一端口。
         let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), discovery_port);
+        let multicast_addr = SocketAddr::new(IpAddr::V4(MULTICAST_GROUP), discovery_port);
 
         trace!("Creating discovery service on port {}", discovery_port);
-        // 用 socket2 创建 socket 并设置 SO_REUSEADDR，允许多个 socket 同时绑定
-        // 同一发现端口（如监听中 + 发送方临时 discovery 同时存在），避免端口冲突。
-        let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-        sock.set_reuse_address(true)?;
-        sock.set_nonblocking(true)?;
-        sock.bind(&SockAddr::from(bind_addr))?;
 
-        // 多播配置：选一个合适的 IPv4 接口，加入多播组并设置发送接口。
-        // 顺序参考 localsend：bind → join → set_multicast_if → set_multicast_loop → set_multicast_ttl。
-        // 每一步失败都只 warn 不致命 —— 发送多播不需要 join，socket 仍可绑定收发普通包。
-        let multicast_addr = SocketAddr::new(IpAddr::V4(MULTICAST_GROUP), discovery_port);
-        match pick_multicast_interface_ipv4() {
-            Some(iface_ip) => {
-                trace!(
-                    "Joining multicast group {} on interface {}",
-                    MULTICAST_GROUP,
-                    iface_ip
-                );
-                // join 让本 socket 收到发往该组的多播包；失败则本机收不到别人的 beacon。
-                if let Err(e) = sock.join_multicast_v4(&MULTICAST_GROUP, &iface_ip) {
+        // 枚举所有合适的 IPv4 接口，每个接口创建一个独立的多播 socket。
+        let iface_ips = list_multicast_interfaces_ipv4();
+        let mut sockets: Vec<Arc<UdpSocket>> = Vec::new();
+
+        for iface_ip in iface_ips {
+            trace!(
+                "为接口 {} 创建多播 socket (group {}, port {})",
+                iface_ip, MULTICAST_GROUP, discovery_port
+            );
+
+            // 每一步失败只 warn 不致命，跳过该接口继续下一个 —— 单个不可用接口
+            // （如虚拟适配器）不应让整个发现服务挂掉。
+            let sock = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
+                Ok(s) => s,
+                Err(e) => {
                     warn!(
-                        "join_multicast_v4({}) on {} failed: {}, 本机可能收不到多播 beacon",
-                        MULTICAST_GROUP, iface_ip, e
-                    );
-                }
-                // 指定从哪个网卡发出多播包，对发送方关键（多接口机器否则可能走默认路由）。
-                if let Err(e) = sock.set_multicast_if_v4(&iface_ip) {
-                    warn!(
-                        "set_multicast_if_v4({}) failed: {}, 多播可能从错误接口发出",
+                        "在接口 {} 上创建 socket 失败: {}, 跳过该接口",
                         iface_ip, e
                     );
+                    continue;
                 }
-                // 开启回环：同机多实例（如集成测试）能收到自己发的多播包。
-                if let Err(e) = sock.set_multicast_loop_v4(true) {
-                    warn!("set_multicast_loop_v4(true) failed: {}", e);
-                }
-                // TTL=1 限制在本地子网，不跨路由器泄漏。
-                if let Err(e) = sock.set_multicast_ttl_v4(1) {
-                    warn!("set_multicast_ttl_v4(1) failed: {}", e);
-                }
+            };
+
+            // SO_REUSEADDR：允许多个 socket 同时绑定同一发现端口。
+            if let Err(e) = sock.set_reuse_address(true) {
+                warn!("set_reuse_address(true) on {} 失败: {}", iface_ip, e);
             }
-            None => {
+
+            // Unix 上设置 SO_REUSEPORT，让多个 socket 能真正同时绑定同一端口
+            // （Windows 没有 SO_REUSEPORT，只有 SO_REUSEADDR）。
+            #[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))]
+            if let Err(e) = sock.set_reuse_port(true) {
+                warn!("set_reuse_port(true) on {} 失败: {}", iface_ip, e);
+            }
+
+            // wildcard 绑定 0.0.0.0:port —— 这是让 socket 能收到发往多播组的包的关键，
+            // 平台会把目的地址和绑定地址做匹配，绑到接口地址反而收不到多播包。
+            if let Err(e) = sock.bind(&SockAddr::from(bind_addr)) {
                 warn!(
-                    "未找到合适的 IPv4 接口加入多播组 {}，多播发现可能不工作",
-                    MULTICAST_GROUP
+                    "bind {} on interface {} 失败: {}, 跳过该接口",
+                    bind_addr, iface_ip, e
+                );
+                continue;
+            }
+
+            // join 让本 socket 收到发往该组的多播包；失败则本机收不到该接口上的别人 beacon，
+            // 这个 socket 没意义了，跳过。
+            if let Err(e) = sock.join_multicast_v4(&MULTICAST_GROUP, &iface_ip) {
+                warn!(
+                    "join_multicast_v4({}) on {} 失败: {}, 跳过该接口",
+                    MULTICAST_GROUP, iface_ip, e
+                );
+                continue;
+            }
+
+            // 指定从该网卡发出多播包，对发送方关键（多接口机器否则可能走默认路由，
+            // 所有 socket 都从同一接口出，热点子网上的设备还是收不到）。
+            if let Err(e) = sock.set_multicast_if_v4(&iface_ip) {
+                warn!(
+                    "set_multicast_if_v4({}) 失败: {}, 多播可能从错误接口发出",
+                    iface_ip, e
                 );
             }
+
+            // 开启回环：同机多实例（如集成测试）能收到自己发的多播包。
+            if let Err(e) = sock.set_multicast_loop_v4(true) {
+                warn!("set_multicast_loop_v4(true) on {} 失败: {}", iface_ip, e);
+            }
+
+            // TTL=1 限制在本地子网，不跨路由器泄漏。
+            if let Err(e) = sock.set_multicast_ttl_v4(1) {
+                warn!("set_multicast_ttl_v4(1) on {} 失败: {}", iface_ip, e);
+            }
+
+            if let Err(e) = sock.set_nonblocking(true) {
+                warn!("set_nonblocking(true) on {} 失败: {}", iface_ip, e);
+            }
+
+            let std_socket: std::net::UdpSocket = sock.into();
+            let tokio_socket = match UdpSocket::from_std(std_socket) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(
+                        "UdpSocket::from_std on {} 失败: {}, 跳过该接口",
+                        iface_ip, e
+                    );
+                    continue;
+                }
+            };
+            sockets.push(Arc::new(tokio_socket));
         }
 
-        let std_socket: std::net::UdpSocket = sock.into();
-        let socket = tokio::net::UdpSocket::from_std(std_socket)?;
+        if sockets.is_empty() {
+            return Err(Error::Protocol(
+                "未能为任何网络接口创建多播 socket，多播发现无法工作".into(),
+            ));
+        }
+
+        trace!("共为 {} 个网络接口创建多播 socket", sockets.len());
 
         Ok(Self {
-            socket,
+            sockets,
             device_id,
             device_name,
             transfer_port,
@@ -138,17 +205,50 @@ impl DiscoveryService {
             )));
         }
 
-        trace!("Sending multicast beacon to {}", self.multicast_addr);
-        self.socket.send_to(&data, self.multicast_addr).await?;
+        // 在所有 socket 上都发一遍 —— 每个 socket pin 到不同接口，这样多播包会从
+        // 每个接口的子网发出，覆盖所有相连的链路（WiFi 子网 + 热点子网等）。
+        for socket in &self.sockets {
+            trace!("Sending multicast beacon to {}", self.multicast_addr);
+            if let Err(e) = socket.send_to(&data, self.multicast_addr).await {
+                warn!("Failed to send multicast beacon on one socket: {}", e);
+            }
+        }
         Ok(())
     }
 
     pub async fn recv_beacon(&self) -> Result<(DiscoveryBeacon, SocketAddr)> {
-        let mut buf = vec![0u8; MAX_PACKET_SIZE];
-        let (len, src_addr) = self.socket.recv_from(&mut buf).await?;
-        buf.truncate(len);
+        // 并行在所有 socket 上 recv_from，任意一个先收到就返回。
+        // JoinSet 在取到第一个成功结果后 drop，会 abort 其余 task —— 这没问题，
+        // DiscoveryManager 的 receiver loop 每次都重新调用 recv_beacon，下次重新 spawn。
+        // Arc<UdpSocket> 的 clone 会在 task abort 时被 drop。
+        let mut join_set = tokio::task::JoinSet::new();
+        for socket in &self.sockets {
+            let socket = Arc::clone(socket);
+            join_set.spawn(async move {
+                let mut buf = vec![0u8; MAX_PACKET_SIZE];
+                socket
+                    .recv_from(&mut buf)
+                    .await
+                    .map(|(len, addr)| (buf, len, addr))
+            });
+        }
 
-        let beacon: DiscoveryBeacon = rmp_serde::from_slice(&buf)
+        let (buf, len, src_addr) = loop {
+            match join_set.join_next().await {
+                Some(Ok(Ok((buf, len, addr)))) => break (buf, len, addr),
+                Some(Ok(Err(e))) => {
+                    warn!("recv_from error on one socket: {}", e);
+                    continue;
+                }
+                Some(Err(e)) => {
+                    warn!("join error: {}", e);
+                    continue;
+                }
+                None => return Err(Error::Protocol("All discovery sockets failed".into())),
+            }
+        };
+
+        let beacon: DiscoveryBeacon = rmp_serde::from_slice(&buf[..len])
             .map_err(|e| Error::Protocol(format!("Invalid beacon: {}", e)))?;
 
         if beacon.version != PROTOCOL_VERSION {
@@ -175,19 +275,22 @@ impl DiscoveryService {
     }
 }
 
-/// 从系统网络接口中挑选一个适合做多播的 IPv4 接口地址。
+/// 列出所有适合加入多播组的 IPv4 接口地址。
 ///
-/// 选择策略（按优先级）：
-/// 1. 跳过 loopback（`127.0.0.0/8`）和名字明显是虚拟网桥的接口
-///    （`docker*`、`veth*`、`vbox*`、`vmnet*`、`virbr*`、`br-*`、`tap*`）
-/// 2. 回退到第一个非 loopback 的 IPv4 地址（即使是虚拟接口也认）
-/// 3. 实在找不到返回 `None`，调用方应回退到只绑定 socket 不 join 多播
-fn pick_multicast_interface_ipv4() -> Option<Ipv4Addr> {
+/// 过滤规则：
+/// 1. 跳过 loopback（`127.0.0.0/8`）
+/// 2. 跳过名字明显是虚拟网桥的接口（`docker*`、`veth*`、`vbox*`、`vmnet*`、
+///    `virbr*`、`br-*`、`tap*`、`lo`）—— 这些通常不是真实链路，加入多播组
+///    反而可能干扰真实接口的发现
+/// 3. 其余每个非 loopback IPv4 接口都返回，调用方会为每个接口创建独立 socket
+///
+/// 返回空 Vec 表示没找到任何合适接口，调用方应返回 Error。
+fn list_multicast_interfaces_ipv4() -> Vec<Ipv4Addr> {
     let ifaces = match if_addrs::get_if_addrs() {
         Ok(v) => v,
         Err(e) => {
             warn!("get_if_addrs failed: {}, 多播发现可能不工作", e);
-            return None;
+            return Vec::new();
         }
     };
 
@@ -203,30 +306,28 @@ fn pick_multicast_interface_ipv4() -> Option<Ipv4Addr> {
             || n == "lo"
     };
 
-    let mut first_non_loopback: Option<Ipv4Addr> = None;
+    let mut result = Vec::new();
     for iface in &ifaces {
         if let if_addrs::IfAddr::V4(v4) = &iface.addr {
             if v4.ip.is_loopback() {
                 continue;
             }
-            if first_non_loopback.is_none() {
-                first_non_loopback = Some(v4.ip);
+            if looks_virtual(&iface.name) {
+                trace!("跳过虚拟网桥接口 {} ({})", iface.name, v4.ip);
+                continue;
             }
-            if !looks_virtual(&iface.name) {
-                trace!(
-                    "Selected multicast interface {} ({})",
-                    iface.name,
-                    v4.ip
-                );
-                return Some(v4.ip);
-            }
+            trace!("候选多播接口 {} ({})", iface.name, v4.ip);
+            result.push(v4.ip);
         }
     }
 
-    if first_non_loopback.is_none() {
-        warn!("未找到任何非 loopback 的 IPv4 接口，多播发现可能不工作");
+    if result.is_empty() {
+        warn!(
+            "未找到任何合适的 IPv4 接口加入多播组 {}，多播发现可能不工作",
+            MULTICAST_GROUP
+        );
     }
-    first_non_loopback
+    result
 }
 
 #[derive(Debug, Clone)]
