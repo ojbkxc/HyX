@@ -22,6 +22,7 @@
     <string name="pair_scan_prompt">Aim at the peer\'s pairing QR code</string>
     <string name="pair_confirm">Confirm</string>
     <string name="pair_cancel">Cancel</string>
+    <string name="auto_listening_hint">Listening for LAN incoming…</string>
     <string name="send_files_label">Pick a file to send</string>
     <string name="start_receive">Start Receiving</string>
     <string name="cancel">Cancel</string>

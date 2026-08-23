@@ -171,6 +171,8 @@ class HyXCoreController : ViewModel() {
      *  to dial in and receive [filePath]. */
     fun startPairing(filePath: String) {
         if (_status.value != TransferStatus.Idle) return
+        // 用户点"分享"隐式决定方向为发送，Pairing 阶段据此显示二维码卡片。
+        _direction.value = TransferDirection.Send
         val code = generatePairingCode()
         _pairingCode.value = PairingCode(code, System.currentTimeMillis() + PAIR_CODE_TTL_MS)
         _status.value = TransferStatus.Pairing
@@ -211,6 +213,8 @@ class HyXCoreController : ViewModel() {
     fun pairWithCode(code: String) {
         val clean = linkCode(code)
         if (clean.isEmpty()) return
+        // 用户扫码/输码隐式决定方向为接收，Pairing 阶段据此显示等待卡片。
+        _direction.value = TransferDirection.Receive
         _pairingCode.value = PairingCode(clean, System.currentTimeMillis() + PAIR_CODE_TTL_MS)
         _status.value = TransferStatus.Pairing
         if (HyXNative.isLoaded) {

@@ -4,7 +4,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -25,9 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,6 +74,7 @@ fun TransferScreen(
     val progress by controller.progress.collectAsState()
     val pairingCode by controller.pairingCode.collectAsState()
     val settings by controller.settings.collectAsState()
+    val autoListening by controller.autoListening.collectAsState()
 
     var showEnterDialog by remember { mutableStateOf(false) }
     var codeInput by remember { mutableStateOf("") }
@@ -121,21 +123,6 @@ fun TransferScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // 发送 / 接收 segmented toggle
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            SegmentedButton(
-                selected = direction == TransferDirection.Send,
-                onClick = { if (!busy) controller.onDirectionChange(TransferDirection.Send) },
-                shape = SegmentedButtonDefaults.itemShape(0, 2)
-            ) { Text(stringResource(R.string.mode_send)) }
-            SegmentedButton(
-                selected = direction == TransferDirection.Receive,
-                onClick = { if (!busy) controller.onDirectionChange(TransferDirection.Receive) },
-                shape = SegmentedButtonDefaults.itemShape(1, 2)
-            ) { Text(stringResource(R.string.mode_receive)) }
-        }
-
-        Spacer(Modifier.height(16.dp))
 
         // 等待配对阶段：发送方亮出二维码，接收方等待
         if (status == TransferStatus.Pairing) {
@@ -152,7 +139,7 @@ fun TransferScreen(
             TransferringPanel(progress = progress!!, onCancel = controller::cancelTransfer)
         } else {
             TransferIdlePanel(
-                sending = sending,
+                autoListening = autoListening,
                 onSendFiles = { pickFile.launch(arrayOf("*/*")) },
                 onScan = onScan,
                 onEnterCode = { showEnterDialog = true }
@@ -304,7 +291,7 @@ private fun TransferringPanel(
 
 @Composable
 private fun TransferIdlePanel(
-    sending: Boolean,
+    autoListening: Boolean,
     onSendFiles: () -> Unit,
     onScan: () -> Unit,
     onEnterCode: () -> Unit
@@ -313,24 +300,47 @@ private fun TransferIdlePanel(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (sending) {
-            // 发送方：一条大按钮搞定 —— 选文件 → 自动生成二维码
-            Button(
-                onClick = onSendFiles,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) { Text(stringResource(R.string.pair_share)) }
-        } else {
-            // 接收方：扫码为主，输码为辅
-            Button(
-                onClick = onScan,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) { Text(stringResource(R.string.pair_scan_receive)) }
-            OutlinedButton(
-                onClick = onEnterCode,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(stringResource(R.string.pair_input_code)) }
+        // 主操作：选文件发送 → 自动生成二维码配对
+        Button(
+            onClick = onSendFiles,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(16.dp)
+        ) { Text(stringResource(R.string.pair_share)) }
+
+        // 跨网络接收入口：扫码为主，输码为辅
+        OutlinedButton(
+            onClick = onScan,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(14.dp)
+        ) { Text(stringResource(R.string.pair_scan_receive)) }
+        OutlinedButton(
+            onClick = onEnterCode,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(stringResource(R.string.pair_input_code)) }
+
+        // 后台自动监听提示：app 启动即监听 LAN 接收，无需用户手动操作
+        if (autoListening) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.tertiary,
+                            shape = RoundedCornerShape(50)
+                        )
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    stringResource(R.string.auto_listening_hint),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

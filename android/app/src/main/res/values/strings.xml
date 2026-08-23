@@ -22,6 +22,7 @@
     <string name="pair_scan_prompt">对准对方的配对二维码</string>
     <string name="pair_confirm">确定</string>
     <string name="pair_cancel">取消</string>
+    <string name="auto_listening_hint">正在监听 LAN 接收…</string>
 
     <!-- Logs -->
     <string name="log_title">运行日志</string>
