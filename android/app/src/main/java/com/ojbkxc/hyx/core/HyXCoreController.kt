@@ -65,6 +65,18 @@ class HyXCoreController : ViewModel() {
     @Volatile
     private var cancelled = false
 
+    /**
+     * 共享的 ProgressCallback 实现，转发到 [recordProgress]。
+     * ProgressCallback 改为普通 interface 后（加了 onPeerFingerprint 默认实现），
+     * `::recordProgress` 方法引用不再能自动转换，需用 object 表达式。
+     * 此字段用于不关心 fingerprint 的现有调用方（hyxStartListener/hyxPair*）。
+     * 关心 fingerprint 的 [startLanSend] 自己构造带 onPeerFingerprint 覆盖的 callback。
+     */
+    private val simpleProgressCb = object : HyXNative.ProgressCallback {
+        override fun onProgress(phase: Int, transferred: Long, total: Long, speed: Long) =
+            recordProgress(phase, transferred, total, speed)
+    }
+
     private val pairAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
     init {
@@ -73,6 +85,76 @@ class HyXCoreController : ViewModel() {
         // tab shows both sections from the first frame.
         _devices.value = loadStoredDevices()
         startDiscovery()
+    }
+
+    /**
+     * LAN 直连发送（带缓存 fingerprint 的 TOFU/pin 连接），对齐 Flutter app 的
+     * StartSendAction。调 [HyXNative.hyxConnectWithFp]：
+     *  - [cachedFingerprint] 非空 → Rust 侧走 pin 快路径（跳过 UDP 发现）。
+     *  - [cachedFingerprint] 空 → Rust 侧走 TOFU，成功后通过 onPeerFingerprint 回传
+     *    实际指纹，此处缓存到对应 Device 以便下次 pin。
+     *
+     * 与 [startPairing] 互斥：仅在 Idle 时启动。发送期间 [direction] 强制为 Send。
+     */
+    fun startLanSend(peerAddress: String, filePath: String, cachedFingerprint: String?) {
+        if (_status.value != TransferStatus.Idle) return
+        _direction.value = TransferDirection.Send
+        _status.value = TransferStatus.Connecting
+        if (!HyXNative.isLoaded) {
+            nudgeStatusToTransferring()
+            return
+        }
+        cancelled = false
+        transferStartedMs = System.currentTimeMillis()
+        val cfg = _settings.value
+        _progress.value = TransferProgress(
+            name = filePath.substringAfterLast('/').ifEmpty { "文件" },
+            direction = _direction.value,
+            transferredBytes = 0,
+            totalBytes = 0,
+            speedBps = 0.0,
+            elapsedMs = 0
+        )
+        // 捕获 peerAddress 供 onPeerFingerprint 回调里定位 Device。
+        val targetAddr = peerAddress
+        val cb = object : HyXNative.ProgressCallback {
+            override fun onProgress(phase: Int, transferred: Long, total: Long, speed: Long) =
+                recordProgress(phase, transferred, total, speed)
+
+            override fun onPeerFingerprint(fingerprint: String) =
+                updateDeviceFingerprint(targetAddr, fingerprint)
+        }
+        transferJob = viewModelScope.launch(Dispatchers.IO) {
+            val err = HyXNative.hyxConnectWithFp(
+                peerAddress = peerAddress,
+                filePath = filePath,
+                chunkBytes = 1_048_576,
+                compression = if (cfg.compression) 1 else 0,
+                port = 14567,
+                cachedFingerprint = cachedFingerprint.orEmpty(),
+                onProgress = cb
+            )
+            if (cancelled) return@launch
+            if (err.isNullOrEmpty()) markCompleted() else failTransfer(err)
+        }
+    }
+
+    /**
+     * 更新对应 address 的 Device 的 fingerprint 并持久化。
+     * 对齐 Flutter app 的 UpdateDeviceFingerprintByAddrAction。
+     * 由 [startLanSend] 的 onPeerFingerprint 回调驱动（TOFU 连接成功后回传）。
+     * 若无匹配 address（如对端不在已发现列表），静默忽略——下次 discover 会捡到。
+     */
+    fun updateDeviceFingerprint(address: String, fingerprint: String) {
+        if (address.isBlank() || fingerprint.isBlank()) return
+        val updated = _devices.value.map {
+            if (it.address == address && it.fingerprint != fingerprint) {
+                it.copy(fingerprint = fingerprint)
+            } else it
+        }
+        if (updated == _devices.value) return
+        _devices.value = updated
+        persistDevices(updated)
     }
 
     /** Sender side of the simplest match: generate a fresh code, surface it as
@@ -107,7 +189,7 @@ class HyXCoreController : ViewModel() {
                 chunkBytes = 1_048_576,
                 compression = if (cfg.compression) 1 else 0,
                 aggregation = if (cfg.aggregation) 1 else 0,
-                onProgress = ::recordProgress
+                onProgress = simpleProgressCb
             )
             if (cancelled) return@launch
             if (err.isNullOrEmpty()) markCompleted() else failTransfer(err)
@@ -132,7 +214,7 @@ class HyXCoreController : ViewModel() {
                     port = RENDEZVOUS_PORT,
                     compression = if (_settings.value.compression) 1 else 0,
                     saveDir = HyXNative.receiveDir,
-                    onProgress = ::recordProgress
+                    onProgress = simpleProgressCb
                 )
                 if (cancelled) return@launch
                 if (err.isNullOrEmpty()) {
@@ -208,7 +290,7 @@ class HyXCoreController : ViewModel() {
                     compression = if (cfg.compression) 1 else 0,
                     aggregation = if (cfg.aggregation) 1 else 0,
                     saveDir = HyXNative.receiveDir,
-                    onProgress = ::recordProgress
+                    onProgress = simpleProgressCb
                 )
                 if (cancelled) return@launch
                 if (err.isNullOrEmpty()) {
@@ -281,7 +363,12 @@ class HyXCoreController : ViewModel() {
 
         val foldedOnline = currentOnline.map { od ->
             val known = (_devices.value + history).firstOrNull { it.id == od.id }
-            if (known != null) od.copy(allowTransfer = known.allowTransfer) else od
+            // 保留持久化的 allowTransfer 和 fingerprint：discover 不返回 fingerprint，
+            // 在线设备的 fingerprint 只能从历史持久化里继承（首次 TOFU 后回填）。
+            if (known != null) od.copy(
+                allowTransfer = known.allowTransfer,
+                fingerprint = known.fingerprint
+            ) else od
         }
         _devices.value = foldedOnline + history
         persistDevices(_devices.value)
@@ -304,8 +391,9 @@ class HyXCoreController : ViewModel() {
     // ---------------------------------------------------------------------
     // Device persistence — known peers + their 接收/禁止 choice survive restarts.
     // The store is a single SharedPreferences string of newline-separated
-    // "id\tname\taddress\tallow(1/0)" entries. Absent prefs (no appContext
-    // yet) degrade to in-memory only.
+    // "id\tname\taddress\tallow(1/0)\tfingerprint(hex或空)" entries。第 5 字段
+    // fingerprint 可空，旧 4 字段格式向后兼容（缺失视为 null）。Absent prefs (no
+    // appContext yet) degrade to in-memory only.
     // ---------------------------------------------------------------------
 
     private fun devicePrefs(): SharedPreferences? =
@@ -317,13 +405,16 @@ class HyXCoreController : ViewModel() {
             ?.mapNotNull { l ->
                 val p = l.split('\t')
                 if (p.size < 4) return@mapNotNull null
+                // 第 5 字段 fingerprint 可缺失（旧格式），空串视为 null。
+                val fp = if (p.size >= 5) p[4].ifEmpty { null } else null
                 Device(
                     id = p[0],
                     name = p[1],
                     address = p[2].ifEmpty { null },
                     via = Device.Via.Lan,
                     online = false,
-                    allowTransfer = p[3] == "1"
+                    allowTransfer = p[3] == "1",
+                    fingerprint = fp
                 )
             }
             ?.toList()
@@ -336,7 +427,7 @@ class HyXCoreController : ViewModel() {
 
     private fun persistDevices(devices: List<Device>) {
         val raw = devices.joinToString("\n") {
-            "${it.id}\t${it.name}\t${it.address.orEmpty()}\t${if (it.allowTransfer) "1" else "0"}"
+            "${it.id}\t${it.name}\t${it.address.orEmpty()}\t${if (it.allowTransfer) "1" else "0"}\t${it.fingerprint.orEmpty()}"
         }
         devicePrefs()?.edit()?.putString(DEV_KEY, raw)?.apply()
     }

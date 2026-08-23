@@ -15,9 +15,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Context
+import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeviceHub
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,19 +34,25 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.documentfile.provider.DocumentFile
 import com.ojbkxc.hyx.R
 import com.ojbkxc.hyx.core.HyXCoreController
 import com.ojbkxc.hyx.ui.components.StatusBadge
 import com.ojbkxc.hyx.ui.model.Device
 import com.ojbkxc.hyx.ui.theme.HyxGreen
+import java.io.File
 
 @Composable
 fun DevicesScreen(controller: HyXCoreController) {
@@ -50,6 +61,25 @@ fun DevicesScreen(controller: HyXCoreController) {
 
     val online = devices.filter { it.online }
     val history = devices.filter { !it.online }
+
+    // LAN 直连发送：选目标设备 → 系统文件选择器 → copyToCache → startLanSend。
+    // sendTarget 记住用户点了哪个设备卡片，文件选择回调里取回。
+    val context = LocalContext.current
+    var sendTarget by remember { mutableStateOf<Device?>(null) }
+    val pickFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val target = sendTarget
+        sendTarget = null
+        if (uri != null && target != null) {
+            val addr = target.address
+            if (addr != null) {
+                copyToCache(context, uri)?.let {
+                    controller.startLanSend(addr, it, target.fingerprint)
+                }
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(
@@ -80,7 +110,14 @@ fun DevicesScreen(controller: HyXCoreController) {
                 }
             } else {
                 items(online, key = { it.id }) { device ->
-                    OnlineDeviceCard(device, onToggle = { controller.toggleAllowTransfer(device.id) })
+                    OnlineDeviceCard(
+                        device,
+                        onToggle = { controller.toggleAllowTransfer(device.id) },
+                        onSend = {
+                            sendTarget = device
+                            pickFile.launch(arrayOf("*/*"))
+                        }
+                    )
                 }
             }
 
@@ -129,7 +166,7 @@ private fun EmptyRow(text: String) {
 }
 
 @Composable
-private fun OnlineDeviceCard(device: Device, onToggle: () -> Unit) {
+private fun OnlineDeviceCard(device: Device, onToggle: () -> Unit, onSend: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = MaterialTheme.shapes.medium,
@@ -152,6 +189,18 @@ private fun OnlineDeviceCard(device: Device, onToggle: () -> Unit) {
             }
             Spacer(Modifier.size(12.dp))
             AllowToggle(device.allowTransfer, onToggle)
+            // 发送给此设备：仅在线且有 address 时可用（LAN 直连需要明确地址）。
+            // 配对码设备（address 为 null）不显示此按钮，仍走 TransferScreen 的配对路径。
+            if (device.address != null) {
+                IconButton(onClick = onSend) {
+                    Icon(
+                        Icons.Outlined.Send,
+                        contentDescription = stringResource(R.string.send_to_device),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -249,4 +298,19 @@ private fun AllowToggle(allow: Boolean, onToggle: () -> Unit) {
 private fun deviceViaLabelRes(via: Device.Via): Int = when (via) {
     Device.Via.Lan -> R.string.via_lan
     Device.Via.Rendezvous -> R.string.via_rendezvous
+}
+
+/**
+ * 将 content URI 复制到 app cache，使 Rust 内核能按路径读取。
+ * 与 TransferScreen.kt 的 copyToCache 实现一致（未提取到公共包以避免改 TransferScreen）。
+ */
+private fun copyToCache(context: Context, uri: Uri): String? = try {
+    val name = DocumentFile.fromSingleUri(context, uri)?.name ?: "share.bin"
+    val destDir = File(context.cacheDir, "hyx_send").apply { mkdirs() }
+    val dest = File(destDir, name)
+    val input = context.contentResolver.openInputStream(uri) ?: return null
+    input.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+    dest.absolutePath
+} catch (e: Exception) {
+    null
 }

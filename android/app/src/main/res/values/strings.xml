@@ -81,6 +81,7 @@
     <string name="allow_transfer">接收</string>
     <string name="block_transfer">禁止</string>
     <string name="delete_device">删除设备</string>
+    <string name="send_to_device">发送给此设备</string>
 
     <!-- History -->
     <string name="tab_history_title">传输历史</string>

@@ -77,6 +77,30 @@ object HyXNative {
         onProgress: ProgressCallback
     ): String?
 
+    /**
+     * LAN 直连发送（带缓存 fingerprint 的 TOFU/pin 连接），对齐 Flutter app 的
+     * `transfer.rs::connect`。决策树：
+     *  - [peerAddress] 非空 + [cachedFingerprint] 非空有效 hex → 直接 pin 连接（快路径）。
+     *  - [peerAddress] 非空 + [cachedFingerprint] 空/无效 → 发现拿 fp，失败回退 TOFU。
+     *  - [peerAddress] 空 → 自动发现一个 peer 后连接（原行为）。
+     *
+     * TOFU 路径成功后，Rust 侧通过 [ProgressCallback.onPeerFingerprint] 回传对端
+     * fingerprint（hex），Kotlin 侧应缓存到对应 Device 以便下次 pin 连接。
+     * pin 路径不回传（调用方已有该 fp）。
+     *
+     * 注意：参数列表与 [hyxConnect] 不同——Rust 侧精简掉了 fsyncEveryBytes 和
+     * aggregation（详见 mobile/src/lib.rs 的 Java_com_ojbkxc_hyx_core_HyXNative_hyxConnectWithFp）。
+     */
+    external fun hyxConnectWithFp(
+        peerAddress: String,
+        filePath: String,
+        chunkBytes: Int,
+        compression: Int,
+        port: Int,
+        cachedFingerprint: String,
+        onProgress: ProgressCallback
+    ): String?
+
     /** Rendezvous pairing, then receive the peer's files into [saveDir]. */
     external fun hyxPairRendezvous(
         code: String,
@@ -113,9 +137,26 @@ object HyXNative {
      */
     external fun hyxSetLogCallback(callback: LogCallback)
 
-    fun interface ProgressCallback {
+    /**
+     * JNI 进度回调。改为普通 interface（非 fun interface）以容纳第二个方法
+     * [onPeerFingerprint]——Rust 侧 drain 在同一个 cb 对象上调用 onPeerFingerprint
+     * （见 mobile/src/lib.rs 的 Evt::PeerFingerprint 分支），所以不能拆成两个
+     * fun interface。
+     *
+     * 默认实现的 [onPeerFingerprint] 保证现有只关心 onProgress 的调用方不破坏；
+     * 但 `::recordProgress` 这类方法引用不再能自动转换为 ProgressCallback，
+     * 调用方需改用 object 表达式或共享的 callback 字段。
+     */
+    interface ProgressCallback {
         /** Mirrors Rust-native progress: phase, bytes done, bytes total, speed B/s. */
         fun onProgress(phase: Int, transferred: Long, total: Long, speed: Long)
+
+        /**
+         * TOFU 连接成功后 Rust 侧回传对端证书 fingerprint（hex 字符串）。
+         * Kotlin 侧应在此缓存指纹到对应 Device，下次连接可直接 pin 跳过 UDP 发现。
+         * 默认空实现：不关心 fingerprint 的调用方（如 hyxStartListener/hyxPair*）无需关心。
+         */
+        fun onPeerFingerprint(fingerprint: String) {}
     }
 
     fun interface LogCallback {

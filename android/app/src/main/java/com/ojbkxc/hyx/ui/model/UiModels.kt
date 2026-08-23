@@ -19,6 +19,10 @@ data class PairingCode(val code: String, val expiresAtMs: Long)
  *                       keys dedup — the same phone seen on different subnets is one entry.
  * @param online         true when currently discovered on the LAN, false for a historical peer.
  * @param allowTransfer  whether transfers from this device are accepted (接收/禁止).
+ * @param fingerprint    对端证书 fingerprint（hex 字符串），首次 TOFU 连接成功后由
+ *                       Rust 侧回传并缓存（见 HyXCoreController.updateDeviceFingerprint）。
+ *                       null 表示尚未缓存，下次连接走 TOFU 回退；非 null 时走 pin 快路径。
+ *                       对齐 Flutter app 的 KnownDevice.fingerprint。
  */
 data class Device(
     val id: String,
@@ -26,7 +30,8 @@ data class Device(
     val address: String?,
     val via: Via,
     val online: Boolean,
-    val allowTransfer: Boolean = true
+    val allowTransfer: Boolean = true,
+    val fingerprint: String? = null
 ) {
     enum class Via { Lan, Rendezvous }
 }

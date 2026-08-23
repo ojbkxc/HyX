@@ -72,6 +72,7 @@
     <string name="via_lan">LAN</string>
     <string name="via_rendezvous">Pairing</string>
     <string name="connected_via_pair">Paired via code</string>
+    <string name="send_to_device">Send to this device</string>
 
     <!-- History -->
     <string name="tab_history_title">Transfer History</string>
