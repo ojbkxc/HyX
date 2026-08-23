@@ -86,14 +86,18 @@ class HyXCoreController : ViewModel() {
     private val pairAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
     init {
-        loadSeedHistory()
-        // Restore persisted devices (historical) before scanning so the 设备
-        // tab shows both sections from the first frame.
-        _devices.value = loadStoredDevices()
-        startDiscovery()
-        // 自动监听接收：应用启动即监听 14567 端口，对齐 Flutter app 的 StartAutoListenAction。
-        // 传输完成后自动重启监听（持续接收），无需用户手动切接收模式 + 点开始接收。
-        startAutoListen()
+        try {
+            loadSeedHistory()
+            // Restore persisted devices (historical) before scanning so the 设备
+            // tab shows both sections from the first frame.
+            _devices.value = loadStoredDevices()
+            startDiscovery()
+            // 自动监听接收：应用启动即监听 14567 端口，对齐 Flutter app 的 StartAutoListenAction。
+            // 传输完成后自动重启监听（持续接收），无需用户手动切接收模式 + 点开始接收。
+            startAutoListen()
+        } catch (t: Throwable) {
+            android.util.Log.e("HyXCoreController", "init block failed", t)
+        }
     }
 
     /**
@@ -340,32 +344,37 @@ class HyXCoreController : ViewModel() {
         cancelled = false
         val cfg = _settings.value
         transferJob = viewModelScope.launch(Dispatchers.IO) {
-            val err = HyXNative.hyxStartListener(
-                port = 14567,
-                chunkBytes = 1_048_576,
-                fsyncEveryBytes = cfg.fsyncEveryBytes,
-                compression = if (cfg.compression) 1 else 0,
-                aggregation = if (cfg.aggregation) 1 else 0,
-                saveDir = HyXNative.receiveDir,
-                onProgress = simpleProgressCb
-            )
-            if (cancelled) return@launch
-            if (err.isNullOrEmpty()) {
-                markCompleted()
-                exportReceivedToDownloads()
-                // 自动监听模式下，传输完成后重启监听（持续接收）。
-                if (_autoListening.value) {
-                    viewModelScope.launch {
-                        // 等 markCompleted 的 1.5s delay 完成后重启，避免 _status 还是
-                        // Completed 时被 startAutoListen 的 Idle 检查阻止。
-                        delay(1600)
-                        if (_autoListening.value && _status.value == TransferStatus.Idle) {
-                            startAutoListen()
+            try {
+                val err = HyXNative.hyxStartListener(
+                    port = 14567,
+                    chunkBytes = 1_048_576,
+                    fsyncEveryBytes = cfg.fsyncEveryBytes,
+                    compression = if (cfg.compression) 1 else 0,
+                    aggregation = if (cfg.aggregation) 1 else 0,
+                    saveDir = HyXNative.receiveDir,
+                    onProgress = simpleProgressCb
+                )
+                if (cancelled) return@launch
+                if (err.isNullOrEmpty()) {
+                    markCompleted()
+                    exportReceivedToDownloads()
+                    // 自动监听模式下，传输完成后重启监听（持续接收）。
+                    if (_autoListening.value) {
+                        viewModelScope.launch {
+                            // 等 markCompleted 的 1.5s delay 完成后重启，避免 _status 还是
+                            // Completed 时被 startAutoListen 的 Idle 检查阻止。
+                            delay(1600)
+                            if (_autoListening.value && _status.value == TransferStatus.Idle) {
+                                startAutoListen()
+                            }
                         }
                     }
+                } else {
+                    // 端口冲突或其他错误：停止自动监听，不弹失败 UI（自动监听失败不该打扰用户）。
+                    _autoListening.value = false
                 }
-            } else {
-                // 端口冲突或其他错误：停止自动监听，不弹失败 UI（自动监听失败不该打扰用户）。
+            } catch (t: Throwable) {
+                android.util.Log.e("HyXCoreController", "startAutoListen failed", t)
                 _autoListening.value = false
             }
         }
@@ -393,14 +402,19 @@ class HyXCoreController : ViewModel() {
     fun startDiscovery() {
         _devicesScanning.value = true
         viewModelScope.launch(Dispatchers.IO) {
-            val raw = if (HyXNative.isLoaded) HyXNative.hyxDiscover(14567) else null
-            val nowOnline = raw.orEmpty()
-                .lineSequence()
-                .filter { it.isNotBlank() }
-                .mapNotNull { parsePeerLine(it) }
-                .toList()
-            mergeDevices(nowOnline)
-            _devicesScanning.value = false
+            try {
+                val raw = if (HyXNative.isLoaded) HyXNative.hyxDiscover(14567) else null
+                val nowOnline = raw.orEmpty()
+                    .lineSequence()
+                    .filter { it.isNotBlank() }
+                    .mapNotNull { parsePeerLine(it) }
+                    .toList()
+                mergeDevices(nowOnline)
+            } catch (t: Throwable) {
+                android.util.Log.e("HyXCoreController", "startDiscovery failed", t)
+            } finally {
+                _devicesScanning.value = false
+            }
         }
     }
 
