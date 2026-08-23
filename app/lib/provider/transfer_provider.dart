@@ -375,8 +375,13 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
       unawaited(notifier._sub?.cancel());
       notifier._sub = null;
       // 自动监听模式下，传输完成后重启监听。
+      // 延迟 1 秒重启，避免 accept 失败时无限快速循环（端口未释放等）。
       if (state.autoListening) {
-        unawaited(dispatchAsync(StartAutoListenAction()));
+        unawaited(Future.delayed(const Duration(seconds: 1), () {
+          if (notifier._sub == null) {
+            unawaited(dispatchAsync(StartAutoListenAction()));
+          }
+        }));
       }
     }
 

@@ -346,6 +346,7 @@ pub fn start_listener(
         {
             Ok(s) => s,
             Err(e) => {
+                tracing::warn!("accept failed on port {port_u16}: {e}");
                 if let Some(d) = discovery.as_ref() {
                     d.stop();
                 }
