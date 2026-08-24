@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hyx_app/gen/strings.g.dart';
 import 'package:hyx_app/pages/history_drawer.dart';
 import 'package:hyx_app/pages/log_sheet.dart';
@@ -15,6 +17,11 @@ import 'package:hyx_app/widget/device_card.dart';
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:refena_flutter/refena_flutter.dart';
+import 'package:share_handler/share_handler.dart';
+
+/// 与 MainActivity.kt 通信的 MethodChannel，用于通知 Dart 侧已就绪、
+/// 可重放启动期间被暂存的分享 intent。
+const _channel = MethodChannel('com.ojbkxc.hyx_app/hyx');
 
 /// HyX 主页面。
 ///
@@ -38,6 +45,14 @@ class _HomePageState extends State<HomePage> with Refena {
   /// 传输进度浮层是否已打开，避免重复弹出。
   bool _sheetOpen = false;
 
+  /// share_handler 的 sharedMediaStream 订阅，dispose 时取消。
+  StreamSubscription<SharedMedia>? _sharedMediaSubscription;
+
+  /// 通过分享 intent 收到、等待用户选择目标设备的文件路径列表。
+  /// 非 null 表示有待处理分享；由 [_handleSharedMedia] 写入，
+  /// [_showDevicePickerForShare] 消费后置 null。
+  List<String>? _pendingShareFiles;
+
   @override
   void initState() {
     super.initState();
@@ -54,7 +69,16 @@ class _HomePageState extends State<HomePage> with Refena {
       unawaited(ref.redux(transferProvider).dispatchAsync(StartAutoListenAction()));
       // 检测更新（fire-and-forget）。
       unawaited(_checkForUpdate());
+      // 初始化分享处理（Android）。
+      _initShareHandler();
     });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_sharedMediaSubscription?.cancel());
+    _sharedMediaSubscription = null;
+    super.dispose();
   }
 
   @override
@@ -69,6 +93,16 @@ class _HomePageState extends State<HomePage> with Refena {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _showTransferSheet();
+      });
+    }
+
+    // 收到分享文件后，等帧渲染完再弹设备选择对话框（避免在 build 中直接 showDialog）。
+    if (_pendingShareFiles != null && _pendingShareFiles!.isNotEmpty) {
+      final files = _pendingShareFiles;
+      _pendingShareFiles = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showDevicePickerForShare(files!);
       });
     }
 
@@ -256,6 +290,144 @@ class _HomePageState extends State<HomePage> with Refena {
       ),
     ));
     _showTransferSheet();
+  }
+
+  /// 初始化 share_handler：获取启动时带来的分享、订阅后续分享流，
+  /// 并通知 Android 侧重放启动期间被暂存的 SEND intent。
+  ///
+  /// 仅在 Android 启用：share_handler 的 initial media / stream 在桌面端
+  /// 无意义，且 `shareIntentReady` MethodChannel 仅在 MainActivity 实现。
+  void _initShareHandler() {
+    if (!Platform.isAndroid) return;
+
+    final shareHandler = ShareHandlerPlatform.instance;
+
+    // 启动时若由分享 intent 拉起，先取出并处理。
+    unawaited(shareHandler.getInitialSharedMedia().then((payload) {
+      if (payload != null) {
+        _handleSharedMedia(payload);
+      }
+    }));
+
+    // 订阅后续分享事件（应用已在前台时再次被分享）。
+    unawaited(_sharedMediaSubscription?.cancel());
+    _sharedMediaSubscription = shareHandler.sharedMediaStream.listen((payload) {
+      _handleSharedMedia(payload);
+    });
+
+    // 通知 MainActivity：Dart 侧已订阅 sharedMediaStream，
+    // 可重放 onNewIntent 期间被暂存的 SEND intent。
+    // 两条消息走同一 messenger 且有序：先 attach stream，再 flush，
+    // 保证重放的 intent 能被 stream 捕获。
+    unawaited(_channel.invokeMethod('shareIntentReady'));
+  }
+
+  /// 从 [SharedMedia] 中提取文件路径，写入 [_pendingShareFiles]，
+  /// 由 build 中的 postFrameCallback 触发设备选择对话框。
+  void _handleSharedMedia(SharedMedia payload) {
+    final paths = <String>[];
+    final attachments = payload.attachments;
+    if (attachments != null) {
+      for (final a in attachments) {
+        if (a == null) continue;
+        // share_handler 的 SharedAttachment.path 在 Android 上是 content:// 或文件路径，
+        // 可能为 null（官方 API 将其声明为可空），需显式判空。
+        final p = a.path;
+        if (p != null && p.isNotEmpty) {
+          paths.add(p);
+        }
+      }
+    }
+    if (paths.isEmpty) return;
+    _pendingShareFiles = paths;
+    // 触发一次 setState，确保 build 中的 postFrameCallback 被调度。
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// 弹出设备选择对话框，让用户挑选分享文件的目标设备。
+  void _showDevicePickerForShare(List<String> files) {
+    final devState = context.read(deviceProvider);
+    final onlineDevices = devState.onlineDevices;
+
+    if (onlineDevices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('附近没有在线设备，无法发送'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('选择发送目标'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: onlineDevices.length,
+              itemBuilder: (listCtx, i) {
+                final d = onlineDevices[i];
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Theme.of(listCtx).colorScheme.primaryContainer,
+                    child: Text(
+                      d.name.isNotEmpty ? d.name[0].toUpperCase() : '?',
+                      style: TextStyle(color: Theme.of(listCtx).colorScheme.onPrimaryContainer),
+                    ),
+                  ),
+                  title: Text(d.name),
+                  onTap: () {
+                    Navigator.pop(listCtx);
+                    _sendSharedFilesToPeer(d, files);
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(t.history.cancel),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 把分享得到的文件发送到选定设备。
+  ///
+  /// 当前 [StartSendAction] 一次只发一个文件，且 busy 时会拒绝新传输，
+  /// 因此多文件场景下仅发送第一个，其余通过 SnackBar 提示。
+  /// 后续可扩展为串行队列。
+  void _sendSharedFilesToPeer(KnownDevice device, List<String> files) {
+    if (files.isEmpty) return;
+    final first = files.first;
+
+    unawaited(context.redux(transferProvider).dispatchAsync(
+      StartSendAction(
+        peerAddress: device.addr,
+        // 有缓存指纹 → 直连 pin 跳过发现；空串（尚未 TOFU 过）→ null 走发现/TOFU 回退。
+        cachedFingerprint: device.fingerprint.isNotEmpty ? device.fingerprint : null,
+        filePath: first,
+      ),
+    ));
+    _showTransferSheet();
+
+    if (files.length > 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('共 ${files.length} 个文件，当前仅发送第一个（${files.first.split(RegExp(r'[/\\]')).last}）'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   /// 切换设备的接收/禁止状态。
