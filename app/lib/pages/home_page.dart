@@ -331,9 +331,9 @@ class _HomePageState extends State<HomePage> with Refena {
       for (final a in attachments) {
         if (a == null) continue;
         // share_handler 的 SharedAttachment.path 在 Android 上是 content:// 或文件路径，
-        // 可能为 null（官方 API 将其声明为可空），需显式判空。
+        // 声明为非空 String（见 share_handler_platform_interface messages.dart）。
         final p = a.path;
-        if (p != null && p.isNotEmpty) {
+        if (p.isNotEmpty) {
           paths.add(p);
         }
       }
