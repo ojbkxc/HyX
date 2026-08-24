@@ -56,10 +56,15 @@
     <!-- Devices -->
     <string name="tab_devices_title">设备</string>
     <string name="no_devices">尚未发现设备</string>
+    <string name="no_devices_hint">请确保设备在同一局域网且已开启 HyX</string>
     <string name="scanning_lan">正在扫描局域网…</string>
+    <string name="scanning">正在扫描</string>
     <string name="devices_count">共 %1$d 台设备</string>
     <string name="via_lan">局域网</string>
     <string name="via_rendezvous">配对码</string>
+    <string name="refresh">刷新</string>
+    <string name="online">在线</string>
+    <string name="offline">离线</string>
 
     <string name="online_devices">在线设备</string>
     <string name="history_devices">历史设备</string>
@@ -68,11 +73,35 @@
     <string name="no_history_devices">暂无历史设备</string>
     <string name="allow_transfer">接收</string>
     <string name="block_transfer">禁止</string>
+    <string name="allow">接收</string>
+    <string name="block">禁止</string>
     <string name="delete_device">删除设备</string>
+    <string name="delete_device_confirm">确定删除历史设备「%1$s」？</string>
+    <string name="device_deleted">已删除 %1$s</string>
     <string name="send_to_device">发送给此设备</string>
+
+    <!-- Transfer progress sheet -->
+    <string name="transfer_close">关闭</string>
+    <string name="transfer_completed">传输完成</string>
+    <string name="transfer_failed">传输失败</string>
+    <string name="transfer_cancelled">已取消</string>
+    <string name="transfer_in_progress">传输中</string>
+    <string name="transfer_pairing">等待配对</string>
+    <string name="transfer_connecting">建立连接</string>
+    <string name="transfer_idle">待命</string>
+    <string name="transfer_transferring">传输中</string>
+    <string name="transfer_transferred">已传</string>
+    <string name="transfer_total">总量</string>
+    <string name="transfer_speed">速度</string>
+    <string name="transfer_elapsed">已用时</string>
+    <string name="transfer_remaining">剩余</string>
 
     <!-- History -->
     <string name="tab_history_title">传输历史</string>
     <string name="no_history">暂无传输记录</string>
+    <string name="history_empty">暂无传输记录</string>
     <string name="history_count">共 %1$d 条记录 · 保留最近 20 条</string>
+    <string name="history_clear">清空</string>
+    <string name="history_clear_confirm">确定清空所有传输历史？</string>
+    <string name="history_cancel">取消</string>
 </resources>

@@ -227,7 +227,10 @@ fn progress_sink(
         last_done: u64,
     }
     let throttle = Arc::new(Mutex::new(Throttle {
-        last_emit: Instant::now(),
+        // 初始化为 1 秒前，确保第一个进度事件（set_total_bytes）不被
+        // 200ms 节流丢弃——否则 Dart 侧 total=0 期间进度条完全不动，
+        // 小文件甚至全程不动然后突然跳满，给用户"假的"感觉。
+        last_emit: Instant::now() - Duration::from_secs(1),
         last_done: 0,
     }));
     Box::new(move |done, total| {

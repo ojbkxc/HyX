@@ -348,6 +348,12 @@ class HyXCoreController : ViewModel() {
         persistDevices(_devices.value)
     }
 
+    /** Clear all transfer history records. */
+    fun clearHistory() {
+        android.util.Log.d("R", "clearHistory")
+        _history.value = emptyList()
+    }
+
     // ---------------------------------------------------------------------
     // Device persistence — known peers + their 接收/禁止 choice survive restarts.
     // The store is a single SharedPreferences string of newline-separated
