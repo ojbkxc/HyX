@@ -33,7 +33,11 @@ target 'Runner' do
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 
-  # share_handler addition start
+  # share_handler_ios depends on share_handler_ios_models, whose podspec is not
+  # published to the CocoaPods trunk repo. We must declare it explicitly with the
+  # local path so `pod install` can resolve the dependency graph.
+  pod "share_handler_ios_models", :path => ".symlinks/plugins/share_handler_ios/ios/Models"
+
   # NOTE: ShareExtension target is disabled because Runner.xcodeproj is generated
   # at CI time by `flutter create`, which does NOT create a ShareExtension target.
   # Referencing a non-existent target makes `pod install` fail with:
@@ -44,9 +48,7 @@ target 'Runner' do
   # (open HyX → pick file → send) does NOT depend on this.
   # target 'ShareExtension' do
   #   inherit! :search_paths
-  #   pod "share_handler_ios_models", :path => ".symlinks/plugins/share_handler_ios/ios/Models"
   # end
-  # share_handler addition end
 end
 
 post_install do |installer|
