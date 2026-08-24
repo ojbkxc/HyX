@@ -6,9 +6,11 @@ import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
+
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -18,9 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -35,6 +37,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,17 +46,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.ojbkxc.hyx.R
 import com.ojbkxc.hyx.ui.model.LogEntry
 import com.ojbkxc.hyx.ui.model.LogLevel
-import com.ojbkxc.hyx.ui.model.LogSource
 import com.ojbkxc.hyx.ui.theme.HyxAmber
-import com.ojbkxc.hyx.ui.theme.HyxBlue
 import com.ojbkxc.hyx.ui.theme.HyxGreen
 import com.ojbkxc.hyx.ui.theme.HyxRed
 import java.text.SimpleDateFormat
@@ -148,14 +153,30 @@ fun LogSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
+            val listState = rememberLazyListState()
+            LaunchedEffect(filtered.size) {
+                if (filtered.isNotEmpty()) {
+                    listState.animateScrollToItem(filtered.lastIndex)
+                }
+            }
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.85f)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(horizontal = 12.dp)
             ) {
-                items(filtered) { entry -> LogRow(entry) }
+                items(filtered) { entry ->
+                    LogRow(
+                        entry = entry,
+                        onLongClick = {
+                            val text = entry.formatted()
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("HyX log", text))
+                            toast(R.string.log_copied)
+                        }
+                    )
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -227,59 +248,44 @@ private fun LevelFilterRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LogRow(entry: LogEntry) {
+private fun LogRow(entry: LogEntry, onLongClick: () -> Unit) {
     val time = remember(entry.timestamp) {
-        SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(entry.timestamp))
+        SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(entry.timestamp))
     }
     val levelColor = levelColor(entry.level)
-    val sourceColor = if (entry.source == LogSource.Rust) HyxBlue else HyxGreen
+    val levelInitial = entry.level.name.first()
 
-    Column(
+    val text = buildAnnotatedString {
+        append(time)
+        append(' ')
+        withStyle(SpanStyle(color = levelColor, fontWeight = FontWeight.Bold)) {
+            append(levelInitial)
+        }
+        append(' ')
+        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+            append(entry.tag)
+        }
+        append(": ")
+        append(entry.message)
+    }
+
+    Text(
+        text = text,
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace,
+        lineHeight = 13.sp,
+        maxLines = 5,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                time,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            .padding(vertical = 1.dp)
+            .combinedClickable(
+                onClick = {},
+                onLongClick = onLongClick
             )
-            Spacer(Modifier.size(6.dp))
-            Text(
-                "[${entry.level.name.uppercase()}]",
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                color = levelColor
-            )
-            Spacer(Modifier.size(6.dp))
-            Text(
-                "[${entry.source.name}]",
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                color = sourceColor
-            )
-            Spacer(Modifier.size(6.dp))
-            Text(
-                entry.tag,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
-        }
-        Text(
-            entry.message,
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    )
 }
 
 @Composable

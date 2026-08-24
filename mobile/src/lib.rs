@@ -356,11 +356,42 @@ static JVM: OnceLock<JavaVM> = OnceLock::new();
 /// and never replaced.
 static LOG_CB: OnceLock<GlobalRef> = OnceLock::new();
 
+use std::cell::Cell;
+
+/// Thread-local recursion guard for [JniLogLayer::on_event].
+///
+/// `on_event` calls into JNI (`env.call_method`, `env.new_string`,
+/// `vm.attach_current_thread`), and the `jni` crate logs these operations via
+/// the `log` crate. `tracing_log::LogTracer::init` bridges `log` back to
+/// `tracing`, so those internal logs would re-enter `on_event` and recurse
+/// infinitely until stack overflow. This flag breaks the cycle: events emitted
+/// while already inside `on_event` on the same thread are silently dropped.
+thread_local! {
+    static IN_LOG_EVENT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// RAII guard that resets [IN_LOG_EVENT] on drop, ensuring the flag is cleared
+/// even if `on_event` returns early on an error path.
+struct LogEventGuard;
+impl Drop for LogEventGuard {
+    fn drop(&mut self) {
+        IN_LOG_EVENT.with(|f| f.set(false));
+    }
+}
+
 /// `tracing-subscriber` Layer that forwards every event to Kotlin via JNI.
 struct JniLogLayer;
 
 impl<S: tracing_core::Subscriber> Layer<S> for JniLogLayer {
     fn on_event(&self, event: &tracing_core::Event<'_>, _ctx: Context<'_, S>) {
+        // Break the recursion: if we're already inside on_event on this thread
+        // (because a JNI call below emitted a `log` event that bridged back to
+        // tracing), drop the event instead of recursing into stack overflow.
+        if IN_LOG_EVENT.with(|f| f.replace(true)) {
+            return;
+        }
+        let _guard = LogEventGuard;
+
         let Some(vm) = JVM.get() else { return };
         let Some(cb) = LOG_CB.get() else { return };
 

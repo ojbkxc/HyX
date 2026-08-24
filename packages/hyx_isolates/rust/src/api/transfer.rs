@@ -156,6 +156,55 @@ fn emit_peer_fingerprint_cached(sink: &StreamSink<RsProgressEvent>, fp_hex: Stri
         status: RsTransferStatus::Connecting,
         message: None,
         peer_fingerprint: Some(fp_hex),
+        file_name: None,
+        peer_address: None,
+    });
+}
+
+/// 接收方在 `accept` / `from_rendezvous` 拿到对端连接后，通过 `sink` 把对端地址回传给 Dart 侧。
+///
+/// 复用 `RsProgressEvent` 携带 `peer_address: Some(addr)`，`status: Connecting`
+/// 表示"连接已建立，正在回填对端地址"。Dart 侧 `transfer_provider` 的 `_UpdateProgressAction`
+/// 用 `event.peerAddress ?? state.peerAddress` 合并，`None` 不覆盖已有值。
+///
+/// 此事件在 `receive_into` 之前发出，不携带字节进度。
+fn emit_peer_address(sink: &StreamSink<RsProgressEvent>, peer_addr: String) {
+    let _ = sink.add(RsProgressEvent {
+        direction: RsTransferDirection::Receive,
+        phase: 1,
+        transferred: 0,
+        total: 0,
+        speed: 0.0,
+        status: RsTransferStatus::Connecting,
+        message: None,
+        peer_fingerprint: None,
+        file_name: None,
+        peer_address: Some(peer_addr),
+    });
+}
+
+/// 接收方在 `receive_to` 完成后，通过 `sink` 把从 `TransferInfo` 解析出的顶层文件名回传给 Dart 侧。
+///
+/// 复用 `RsProgressEvent` 携带 `file_name: Some(name)`，`status: Transferring`
+/// 表示"传输已完成数据流，正在回填文件名"。Dart 侧用 `event.fileName ?? state.fileName` 合并。
+///
+/// 此事件在 `emit_final(Completed)` 之前发出，让历史记录能拿到真实文件名。
+fn emit_file_name(
+    sink: &StreamSink<RsProgressEvent>,
+    file_name: String,
+    direction: RsTransferDirection,
+) {
+    let _ = sink.add(RsProgressEvent {
+        direction,
+        phase: 2,
+        transferred: 0,
+        total: 0,
+        speed: 0.0,
+        status: RsTransferStatus::Transferring,
+        message: None,
+        peer_fingerprint: None,
+        file_name: Some(file_name),
+        peer_address: None,
     });
 }
 
@@ -163,9 +212,15 @@ fn emit_peer_fingerprint_cached(sink: &StreamSink<RsProgressEvent>, fp_hex: Stri
 ///
 /// 对应 mobile `progress_sink`：滑动窗口速率，避免每个 chunk 都回调淹没 UI。
 /// 与 mobile 差异：直接 `sink.add(RsProgressEvent { ... })`，无需 mpsc 中转。
+///
+/// `file_name` / `peer_address` 透传到每个 `Transferring` 事件：发送流程传入已知值，
+/// 接收流程传入 `None`（接收方的这两个字段由 `emit_peer_address` / `emit_file_name`
+/// 单独的事件回填，Dart 侧 `copyWith` 用 `??` 合并，`None` 不覆盖）。
 fn progress_sink(
     sink: StreamSink<RsProgressEvent>,
     direction: RsTransferDirection,
+    file_name: Option<String>,
+    peer_address: Option<String>,
 ) -> ProgressCallback {
     struct Throttle {
         last_emit: Instant,
@@ -199,6 +254,8 @@ fn progress_sink(
             status: RsTransferStatus::Transferring,
             message: None,
             peer_fingerprint: None,
+            file_name: file_name.clone(),
+            peer_address: peer_address.clone(),
         });
     })
 }
@@ -233,21 +290,41 @@ async fn receive_into(
 
     let out = PathBuf::from(dir);
     let mut prog = ProgressState::new(0);
-    prog.set_progress_callback(progress_sink(sink.clone(), RsTransferDirection::Receive));
-    session
+    prog.set_progress_callback(progress_sink(
+        sink.clone(),
+        RsTransferDirection::Receive,
+        None,
+        None,
+    ));
+    let summary = session
         .receive_to(&out, None, |_| AcceptDecision::Accept, Some(&mut prog))
         .await?;
+    // 接收完成后，把从 TransferInfo 解析出的顶层文件名回填给 Dart 侧，
+    // 让历史记录能拿到真实文件名（而非空串）。root_name 为空时不 emit，避免无意义事件。
+    if !summary.root_name.is_empty() {
+        emit_file_name(sink, summary.root_name, RsTransferDirection::Receive);
+    }
     Ok(())
 }
 
 /// 发送 `path` 到对端，带断点续传状态文件。对应 mobile `send_path`。
+///
+/// `file_name` / `peer_address` 透传到每个 `Transferring` 进度事件，让 Dart 侧
+/// 历史记录能直接拿到值（发送方在启动时已知，无需像接收方那样事后回填）。
 async fn send_path(
     session: &mut P2PSession,
     path: &str,
     sink: &StreamSink<RsProgressEvent>,
+    file_name: Option<String>,
+    peer_address: Option<String>,
 ) -> Result<()> {
     let mut prog = ProgressState::new(0);
-    prog.set_progress_callback(progress_sink(sink.clone(), RsTransferDirection::Send));
+    prog.set_progress_callback(progress_sink(
+        sink.clone(),
+        RsTransferDirection::Send,
+        file_name,
+        peer_address,
+    ));
 
     let src = std::path::Path::new(path);
     let mut state_path = src.to_path_buf();
@@ -268,6 +345,10 @@ async fn send_path(
 }
 
 /// 发送最终事件（Completed / Failed）到 sink。
+///
+/// `file_name` / `peer_address` 透传 `None`：发送流程的这两个值已在启动时由
+/// `StartSendAction` 设置到 Dart 侧 state，接收流程由 `emit_peer_address` /
+/// `emit_file_name` 单独事件回填，Dart 侧 `copyWith` 用 `??` 合并，`None` 不覆盖。
 fn emit_final(
     sink: &StreamSink<RsProgressEvent>,
     status: RsTransferStatus,
@@ -283,6 +364,8 @@ fn emit_final(
         status,
         message: msg,
         peer_fingerprint: None,
+        file_name: None,
+        peer_address: None,
     });
 }
 
@@ -359,6 +442,8 @@ pub fn start_listener(
                 return;
             }
         };
+        // accept 成功 → 把对端地址回填给 Dart 侧，让历史记录能拿到真实 peer_address。
+        emit_peer_address(&sink_clone, session.peer_addr().to_string());
         let res = receive_into(&mut session, &dir, &sink_clone).await;
         if let Some(d) = discovery.as_ref() {
             d.stop();
@@ -425,6 +510,12 @@ pub fn connect(
     let peer = peer_address.clone();
     let path = file_path.clone();
     let sink_clone = sink.clone();
+    // 发送方在启动时已知文件名与对端地址，透传到每个 Transferring 进度事件，
+    // 让 Dart 侧历史记录能直接拿到值（无需像接收方那样事后回填）。
+    let send_file_name = std::path::Path::new(&file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned());
+    let send_peer_addr = (!peer_address.is_empty()).then_some(peer_address.clone());
 
     let join = runtime().spawn(async move {
         // ---- 阶段 1：解析地址 + 决定 fingerprint 来源 ----
@@ -572,7 +663,14 @@ pub fn connect(
         };
 
         // ---- 阶段 3：发送文件 ----
-        let res = send_path(&mut session, &path, &sink_clone).await;
+        let res = send_path(
+            &mut session,
+            &path,
+            &sink_clone,
+            send_file_name.clone(),
+            send_peer_addr.clone(),
+        )
+        .await;
         match res {
             Ok(()) => emit_final(
                 &sink_clone,
@@ -622,6 +720,11 @@ pub fn connect_direct(
     };
     let path = file_path.clone();
     let sink_clone = sink.clone();
+    // 发送方在启动时已知文件名与对端地址，透传到每个 Transferring 进度事件。
+    let send_file_name = std::path::Path::new(&file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned());
+    let send_peer_addr = (!peer_address.is_empty()).then_some(peer_address.clone());
 
     let join = runtime().spawn(async move {
         let peer_addr = match P2PSession::resolve_peer_addr(&peer_address, port_u16).await {
@@ -661,7 +764,14 @@ pub fn connect_direct(
                     return;
                 }
             };
-        let res = send_path(&mut session, &path, &sink_clone).await;
+        let res = send_path(
+            &mut session,
+            &path,
+            &sink_clone,
+            send_file_name.clone(),
+            send_peer_addr.clone(),
+        )
+        .await;
         match res {
             Ok(()) => emit_final(
                 &sink_clone,
@@ -725,6 +835,8 @@ pub fn pair_rendezvous(
             status: RsTransferStatus::Pairing,
             message: None,
             peer_fingerprint: None,
+            file_name: None,
+            peer_address: None,
         });
 
         let rv = match P2PSession::resolve_peer_addr(&server_o, port_u16).await {
@@ -760,6 +872,8 @@ pub fn pair_rendezvous(
                 return;
             }
         };
+        // rendezvous 连接建立 → 把对端地址回填给 Dart 侧。
+        emit_peer_address(&sink_clone, session.peer_addr().to_string());
         let res = receive_into(&mut session, &dir, &sink_clone).await;
         match res {
             Ok(()) => emit_final(
@@ -813,6 +927,11 @@ pub fn pair_send(
     let server_o = server.clone();
     let path = file_path.clone();
     let sink_clone = sink.clone();
+    // 发送方在启动时已知文件名，透传到每个 Transferring 进度事件。
+    // peer_address 在 rendezvous 路径下由 server 中转，连接建立前未知，留 None。
+    let send_file_name = std::path::Path::new(&file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned());
 
     let join = runtime().spawn(async move {
         let _ = sink_clone.add(RsProgressEvent {
@@ -824,6 +943,8 @@ pub fn pair_send(
             status: RsTransferStatus::Pairing,
             message: None,
             peer_fingerprint: None,
+            file_name: None,
+            peer_address: None,
         });
 
         let rv = match P2PSession::resolve_peer_addr(&server_o, port_u16).await {
@@ -859,7 +980,14 @@ pub fn pair_send(
                 return;
             }
         };
-        let res = send_path(&mut session, &path, &sink_clone).await;
+        let res = send_path(
+            &mut session,
+            &path,
+            &sink_clone,
+            send_file_name.clone(),
+            None,
+        )
+        .await;
         match res {
             Ok(()) => emit_final(
                 &sink_clone,

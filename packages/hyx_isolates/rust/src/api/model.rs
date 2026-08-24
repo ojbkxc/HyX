@@ -90,6 +90,11 @@ pub struct RsProgressEvent {
     /// pin 连接、接收、rendezvous 路径均为 `None`。Dart 侧 `transfer_provider` 监听到
     /// 非 `None` 时把它写入对应 `KnownDevice.fingerprint` 持久化。
     pub peer_fingerprint: Option<String>,
+
+    /// 文件名(接收方在收到 TransferInfo 后回填；发送方在启动时已知)。
+    pub file_name: Option<String>,
+    /// 对端地址(接收方在 accept 拿到连接后回填；发送方在启动时已知)。
+    pub peer_address: Option<String>,
 }
 
 /// 日志事件。用 `StreamSink<RsLogEvent>` 替代 mobile 的 JNI `onLog(level, tag, msg)` 回调。

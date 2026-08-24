@@ -67,12 +67,7 @@ class LogSheet extends StatelessWidget {
                 ? Center(
                     child: Text(t.log.empty, style: TextStyle(color: scheme.onSurfaceVariant)),
                   )
-                : ListView.builder(
-                    controller: controller,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    itemCount: logs.length,
-                    itemBuilder: (_, i) => _LogRow(entry: logs[i]),
-                  ),
+                : _LogList(logs: logs),
           ),
         ],
       ),
@@ -136,10 +131,65 @@ class _LevelFilterRow extends StatelessWidget {
   }
 }
 
+class _LogList extends StatefulWidget {
+  final List<LogEntry> logs;
+  const _LogList({required this.logs, super.key});
+
+  @override
+  State<_LogList> createState() => _LogListState();
+}
+
+class _LogListState extends State<_LogList> {
+  final _controller = ScrollController();
+
+  @override
+  void didUpdateWidget(_LogList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.logs.length != oldWidget.logs.length && widget.logs.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_controller.hasClients) {
+          _controller.animateTo(
+            _controller.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 150),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      controller: _controller,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      itemCount: widget.logs.length,
+      itemBuilder: (context, i) {
+        final entry = widget.logs[i];
+        return _LogRow(
+          entry: entry,
+          onLongPress: () {
+            final text = _formatEntry(entry);
+            Clipboard.setData(ClipboardData(text: text));
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t.log.copied)));
+          },
+        );
+      },
+    );
+  }
+}
+
 class _LogRow extends StatelessWidget {
   final LogEntry entry;
+  final VoidCallback onLongPress;
 
-  const _LogRow({required this.entry});
+  const _LogRow({required this.entry, required this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
@@ -147,47 +197,28 @@ class _LogRow extends StatelessWidget {
     final time = DateTime.fromMillisecondsSinceEpoch(entry.timestamp);
     final timeStr = '${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}:'
-        '${time.second.toString().padLeft(2, '0')}.'
-        '${time.millisecond.toString().padLeft(3, '0')}';
+        '${time.second.toString().padLeft(2, '0')}';
     final levelColor = _levelColor(entry.level, scheme);
+    final levelInitial = entry.level.name[0].toUpperCase();
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 1),
+        child: Text.rich(
+          TextSpan(
+            style: const TextStyle(fontSize: 10, fontFamily: 'monospace', height: 1.3),
             children: [
-              Text(
-                timeStr,
-                style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                '[${entry.level.name.toUpperCase()}]',
-                style: TextStyle(fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: levelColor),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  entry.tag,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: scheme.onSurfaceVariant),
-                ),
-              ),
+              TextSpan(text: '$timeStr ', style: TextStyle(color: scheme.onSurfaceVariant)),
+              TextSpan(text: levelInitial, style: TextStyle(color: levelColor, fontWeight: FontWeight.bold)),
+              const TextSpan(text: ' '),
+              TextSpan(text: '${entry.tag}: ', style: TextStyle(color: scheme.onSurfaceVariant)),
+              TextSpan(text: entry.message, style: TextStyle(color: scheme.onSurface)),
             ],
           ),
-          Text(
-            entry.message,
-            style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: scheme.onSurface),
-          ),
-        ],
+          maxLines: 5,
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }
