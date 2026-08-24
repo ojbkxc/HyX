@@ -311,10 +311,10 @@ fn transport_config() -> TransportConfig {
 
     // 极速要旨：给整批在途让路。GSO 在支持的内核（Linux/Android）上把
     // 大批同头 UDP 包合并发送，显著压低 CPU；初始 MTU 抬到典型链路值，
-    // 减少包数、摊薄固定开销。拥塞控制使用本地 quinn-proto 增强版的
-    // BBR v2（移植自 quiche-bbr2，见 vendor/quinn-proto/src/congestion/
-    // bbr2.rs），作为引擎默认发送策略——Startup/ProbeBW 增益循环在保持
-    // 极速的同时压低队列与丢包，优于 quinn 内置 Cubic。
+    // 减少包数、摊薄固定开销。拥塞控制使用 Brutal 算法（见
+    // vendor/quinn-proto/src/congestion/brutal.rs）——固定带宽，丢包
+    // 不退避，适合"越快越好"的文件传输场景，在高丢包环境下远超 BBR v2
+    // 和 Cubic 的退避行为。
     t.enable_segmentation_offload(true);
     t.initial_mtu(1432);
     t

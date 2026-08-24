@@ -390,7 +390,9 @@ impl Default for TransportConfig {
             #[cfg(test)]
             deterministic_packet_numbers: false,
 
-            congestion_controller_factory: Arc::new(congestion::Bbr2Config::default()),
+            // 默认使用 Brutal 拥塞控制：固定带宽，丢包不退避，
+            // 适合"越快越好"的文件传输场景，在高丢包环境下远超 BBR v2 / Cubic。
+            congestion_controller_factory: Arc::new(congestion::BrutalConfig::default()),
 
             enable_segmentation_offload: true,
 
