@@ -861,9 +861,21 @@ jobs:
         working-directory: app/ios
         run: pod install
 
-      - name: 构建未签名 IPA
+      - name: 构建未签名 archive
         working-directory: app
-        run: flutter build ipa --release --no-codesign --export-options-plist=ios/ExportOptions.plist
+        # `flutter build ipa --no-codesign` builds the .xcarchive but skips IPA
+        # export because the export step requires codesigning. We build the archive
+        # here, then manually create an unsigned IPA from it in the next step.
+        run: flutter build ipa --release --no-codesign
+
+      - name: 从 archive 打包未签名 IPA
+        working-directory: app
+        run: |
+          mkdir -p build/ios/ipa/Payload
+          cp -r build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -qry HyX-unsigned.ipa Payload
+          echo "IPA size: $(du -h HyX-unsigned.ipa | cut -f1)"
 
       - name: 上传 IPA 产物
         uses: actions/upload-artifact@v4
