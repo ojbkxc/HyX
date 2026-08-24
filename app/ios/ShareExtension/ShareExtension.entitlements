@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App group shared between the main app and the share extension so the
+	     share_handler plugin can stage shared media where Runner can pick it up.
+	     The group id follows the main bundle id (com.ojbxc.hyx_app) with the
+	     conventional "group." prefix. Note: app groups require a paid Apple
+	     Developer account to provision; for self-signed unsigned IPAs the
+	     share extension still compiles but cross-process sharing may be
+	     unavailable until the user provisions the group. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.ojbxc.hyx_app</string>
+	</array>
+</dict>
+</plist>

@@ -809,9 +809,14 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
-  # iOS 无签名构建验证（macos-latest）
+  # iOS 未签名 IPA（macos-latest）
+  #
+  # 出一个未签名的 .ipa 产物挂进 Release，供用户用 Sideloadly / AltStore
+  # 自行签名安装（免费 Apple ID 7 天有效期）。--no-codesign 跳过签名，
+  # 不需要 Apple Developer 账号，CI 也不需要任何证书/描述文件。
+  # 这个 job 同时充当 iOS 编译验证（替代旧的 build_ios_no_sign）。
   # ─────────────────────────────────────────────────────────────
-  build_ios_no_sign:
+  build_ios_unsigned_ipa:
     needs: build
     runs-on: macos-latest
 
@@ -852,15 +857,19 @@ jobs:
         working-directory: app
         run: dart run slang
 
-      - name: 编译 iOS（无签名）
-        working-directory: app
-        run: flutter build ios --release --no-codesign
+      - name: 安装 CocoaPods
+        working-directory: app/ios
+        run: pod install
 
-      - name: 上传构建产物
+      - name: 构建未签名 IPA
+        working-directory: app
+        run: flutter build ipa --release --no-codesign --export-options-plist=ios/ExportOptions.plist
+
+      - name: 上传 IPA 产物
         uses: actions/upload-artifact@v4
         with:
-          name: ios-no-sign-result
-          path: app/build/ios/iphoneos/Runner.app
+          name: ios-unsigned-ipa-result
+          path: app/build/ios/ipa/*.ipa
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
@@ -941,7 +950,7 @@ jobs:
       - build_windows_zip_x86_64
       - build_windows_exe_x86_64
       - build_macos
-      - build_ios_no_sign
+      - build_ios_unsigned_ipa
       - build_cli_linux
       - build_cli_windows_exe
     runs-on: ubuntu-24.04
@@ -982,6 +991,8 @@ jobs:
           cp all-artifacts/windows-exe-x86-64-result/*.exe "release-assets/HyX-$VERSION-windows-x86-64.exe" 2>/dev/null || true
           # macOS zip
           cp all-artifacts/macos-zip-result/*.zip "release-assets/HyX-$VERSION-macos.zip" 2>/dev/null || true
+          # iOS 未签名 IPA（用户自行签名安装）
+          cp all-artifacts/ios-unsigned-ipa-result/*.ipa "release-assets/HyX-$VERSION-ios-unsigned.ipa" 2>/dev/null || true
           # CLI - Linux tar.gz
           cp all-artifacts/cli-linux-x86-64-result/*.tar.gz "release-assets/HyX-CLI-$VERSION-linux-x86-64.tar.gz" 2>/dev/null || true
           cp all-artifacts/cli-linux-arm-64-result/*.tar.gz "release-assets/HyX-CLI-$VERSION-linux-arm-64.tar.gz" 2>/dev/null || true
@@ -1022,6 +1033,7 @@ jobs:
             | Windows x86_64 安装包 | `HyX-${{ needs.build.outputs.version }}-windows-x86-64.exe` |
             | Windows x86_64 便携版 | `HyX-${{ needs.build.outputs.version }}-windows-x86-64.zip` |
             | macOS           | `HyX-${{ needs.build.outputs.version }}-macos.zip` |
+            | iOS (未签名 IPA) | `HyX-${{ needs.build.outputs.version }}-ios-unsigned.ipa` |
             | CLI Linux x86_64 | `HyX-CLI-${{ needs.build.outputs.version }}-linux-x86-64.tar.gz` |
             | CLI Linux arm64  | `HyX-CLI-${{ needs.build.outputs.version }}-linux-arm-64.tar.gz` |
             | CLI Windows x86_64 | `HyX-CLI-${{ needs.build.outputs.version }}-windows-x86-64.exe` |
@@ -1051,7 +1063,8 @@ jobs:
               "linux-x86-64-appimage": "HyX-${VERSION}-linux-x86-64.AppImage",
               "windows-x86-64-exe": "HyX-${VERSION}-windows-x86-64.exe",
               "windows-x86-64-zip": "HyX-${VERSION}-windows-x86-64.zip",
-              "macos": "HyX-${VERSION}-macos.zip"
+              "macos": "HyX-${VERSION}-macos.zip",
+              "ios-unsigned-ipa": "HyX-${VERSION}-ios-unsigned.ipa"
             }
           }
           JSONEOF
@@ -1076,6 +1089,7 @@ jobs:
                 *.deb) content_type="application/vnd.debian.binary-package" ;;
                 *.AppImage) content_type="application/x-executable" ;;
                 *.exe) content_type="application/x-msdownload" ;;
+                *.ipa) content_type="application/octet-stream" ;;
               esac
               echo "Uploading $filename..."
               curl -s -X PUT \

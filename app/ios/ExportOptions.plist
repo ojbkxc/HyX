@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Used by `xcodebuild -exportArchive` / `flutter build ipa` when a
+	     signed export is needed. For the unsigned IPA shipped to users for
+	     self-signing, `flutter build ipa --no-codesign --release` ignores
+	     this file entirely; it is kept here so a future signed CI lane
+	     (e.g. TestFlight) can point at it without re-inventing the plist. -->
+	<key>method</key>
+	<string>release</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>stripSwiftSymbols</key>
+	<true/>
+	<key>compileBitcode</key>
+	<false/>
+	<key>thinning</key>
+	<string>&lt;none&gt;</string>
+</dict>
+</plist>

@@ -63,6 +63,35 @@ cargo test --workspace
 3. 接收端：传输页点「开始接收」（或通过配对码/扫码建立连接）
 4. 传输完成后文件自动出现在「下载」目录
 
+## iOS 安装（免费自签）
+
+iOS 版以**未签名 IPA** 形式发布（文件名 `HyX-<版本>-ios-unsigned.ipa`），
+不出 App Store，无需付费 Apple Developer 账号。下载后用自己的 Apple ID
+签名安装即可。
+
+### 步骤
+
+1. 从 [GitHub Release](.) 下载 `HyX-<版本>-ios-unsigned.ipa`。
+2. 用以下任一工具签名安装到 iPhone/iPad：
+   - **[Sideloadly](https://sideloadly.io)**（Windows/macOS，推荐）：用个人
+     Apple ID 签名 IPA 并安装，需用数据线连接设备。
+   - **[AltStore](https://altstore.io)**（Windows/macOS）：装好后在 AltStore
+     里点「+」选 IPA 安装；AltStore 会**自动后台刷新**，避免 7 天过期。
+3. 安装后到 **设置 → 通用 → VPN与设备管理**，找到你的开发者证书，点
+   **信任**，即可打开 HyX。
+4. 首次打开会弹「本地网络」权限，**必须允许**，否则搜不到附近设备。
+
+### 注意
+
+- 个人（免费）Apple ID 签名的 App **每 7 天过期一次**，到期需重新签名
+  安装。用 AltStore 并保持电脑常开可自动续签；Sideloadly 需手动重签。
+- 每个免费 Apple ID 最多同时签 3 个 App，每周最多签 10 次。
+- **TrollStore**：若设备系统在 iOS 14.0–16.6.1（部分 16.6.x）且已越狱/
+   有 TrollStore，可用 TrollStore 永久签名 HyX，无需 7 天重签。详见
+   [TrollStore 官方仓库](https://github.com/opa334/TrollStore)。
+- 局域网互传需双方在同一 Wi-Fi；若搜不到对端，去系统设置确认 HyX 的
+  「本地网络」权限已开启。
+
 ## 版本号
 
 版本从 Git 标签或手动输入解析，`versionCode` 由 semver 计算，写入

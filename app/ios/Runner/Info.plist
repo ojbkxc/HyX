@@ -67,6 +67,20 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 
+	<!-- Flag to skip the App Store export-compliance question prompt.
+	     HyX ships as an unsigned IPA for self-signing, but declaring this
+	     keeps the build export-questions-free regardless of distribution. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- Locales shipped by the Flutter app (mirrors app/assets/i18n/).
+	     Keep in sync when a new <locale>.json is added. -->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-CN</string>
+	</array>
+
     <!-- Make downloaded files visible to the user -->
     <key>UISupportsDocumentBrowser</key>
     <true/>
@@ -74,10 +88,27 @@
     <!-- Permissions -->
     <key>NSPhotoLibraryUsageDescription</key>
     <string>The app needs photo library access so that the user can select photos to share.</string>
+    <!-- Add-only access: saving received media into the photo library. -->
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>The app saves received media to the photo library.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
+    <string>The app requires the local IP to communicate.</string>
+    <!-- "Always" variant mirrors LocalSend so the prompt wording stays
+         consistent if a future build requests background location. -->
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>The app requires the local IP to communicate.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>The app uses the local network to find and connect to nearby devices.</string>
+    <!-- HyX discovers peers via UDP multicast (224.0.0.167:14566), NOT Bonjour
+         mDNS. iOS 14+ still requires NSBonjourServices to be declared for the
+         NSLocalNetworkUsageDescription prompt to fire reliably and to pass App
+         Store review. We declare a HyX-specific service type so reviewers can
+         see it matches the app's purpose; the value is informational only —
+         no NWBrowser/NetService is ever started. -->
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_hyx._tcp</string>
+    </array>
 
     <!-- share_handler -->
     <key>CFBundleURLTypes</key>
