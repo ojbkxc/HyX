@@ -133,7 +133,7 @@ class _LevelFilterRow extends StatelessWidget {
 
 class _LogList extends StatefulWidget {
   final List<LogEntry> logs;
-  const _LogList({required this.logs, super.key});
+  const _LogList({required this.logs});
 
   @override
   State<_LogList> createState() => _LogListState();
@@ -148,11 +148,11 @@ class _LogListState extends State<_LogList> {
     if (widget.logs.length != oldWidget.logs.length && widget.logs.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_controller.hasClients) {
-          _controller.animateTo(
+          unawaited(_controller.animateTo(
             _controller.position.maxScrollExtent,
             duration: const Duration(milliseconds: 150),
             curve: Curves.easeOut,
-          );
+          ));
         }
       });
     }
@@ -176,7 +176,7 @@ class _LogListState extends State<_LogList> {
           entry: entry,
           onLongPress: () {
             final text = _formatEntry(entry);
-            Clipboard.setData(ClipboardData(text: text));
+            unawaited(Clipboard.setData(ClipboardData(text: text)));
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t.log.copied)));
           },
         );

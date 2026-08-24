@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -216,7 +217,7 @@ private fun MetricRow(progress: TransferProgress) {
 
 /** 单个指标列（等宽）。对齐 Flutter _Metric。 */
 @Composable
-private fun Metric(
+private fun RowScope.Metric(
     label: String,
     value: String,
     labelStyle: androidx.compose.ui.text.TextStyle,

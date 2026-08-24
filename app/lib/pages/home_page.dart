@@ -361,7 +361,7 @@ class _HomePageState extends State<HomePage> with Refena {
       return;
     }
 
-    showDialog<void>(
+    unawaited(showDialog<void>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
@@ -398,7 +398,7 @@ class _HomePageState extends State<HomePage> with Refena {
           ],
         );
       },
-    );
+    ));
   }
 
   /// 把分享得到的文件发送到选定设备。
