@@ -34,11 +34,19 @@ target 'Runner' do
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 
   # share_handler addition start
-    target 'ShareExtension' do
-      inherit! :search_paths
-      pod "share_handler_ios_models", :path => ".symlinks/plugins/share_handler_ios/ios/Models"
-    end
-    # share_handler addition end
+  # NOTE: ShareExtension target is disabled because Runner.xcodeproj is generated
+  # at CI time by `flutter create`, which does NOT create a ShareExtension target.
+  # Referencing a non-existent target makes `pod install` fail with:
+  #   [!] Unable to find a target named `ShareExtension` in project `Runner.xcodeproj`
+  # The ShareExtension source files are kept under app/ios/ShareExtension/ for a
+  # future migration to a committed Runner.xcodeproj (like localsend does), which
+  # would allow the share-from-other-apps entry point to work. Core file transfer
+  # (open HyX → pick file → send) does NOT depend on this.
+  # target 'ShareExtension' do
+  #   inherit! :search_paths
+  #   pod "share_handler_ios_models", :path => ".symlinks/plugins/share_handler_ios/ios/Models"
+  # end
+  # share_handler addition end
 end
 
 post_install do |installer|
