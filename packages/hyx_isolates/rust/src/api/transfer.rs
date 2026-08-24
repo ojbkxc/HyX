@@ -289,22 +289,76 @@ async fn receive_into(
     }
 
     let out = PathBuf::from(dir);
-    let mut prog = ProgressState::new(0);
-    prog.set_progress_callback(progress_sink(
-        sink.clone(),
-        RsTransferDirection::Receive,
-        None,
-        None,
-    ));
-    let summary = session
-        .receive_to(&out, None, |_| AcceptDecision::Accept, Some(&mut prog))
-        .await?;
-    // 接收完成后，把从 TransferInfo 解析出的顶层文件名回填给 Dart 侧，
-    // 让历史记录能拿到真实文件名（而非空串）。root_name 为空时不 emit，避免无意义事件。
-    if !summary.root_name.is_empty() {
-        emit_file_name(sink, summary.root_name, RsTransferDirection::Receive);
+    // 接收方重连配置：与 send_path 对齐（默认 5 次，指数退避）。
+    // 接收方重连 = 重新 accept 等待对端重连过来，与发送方重连（重新 connect）不同。
+    let reconnect_config = ReconnectConfig::default();
+    let mut attempt = 0u32;
+
+    loop {
+        let mut prog = ProgressState::new(0);
+        prog.set_progress_callback(progress_sink(
+            sink.clone(),
+            RsTransferDirection::Receive,
+            None,
+            None,
+        ));
+        let result = session
+            .receive_to(&out, None, |_| AcceptDecision::Accept, Some(&mut prog))
+            .await;
+
+        match result {
+            Ok(summary) => {
+                // 接收完成后，把从 TransferInfo 解析出的顶层文件名回填给 Dart 侧，
+                // 让历史记录能拿到真实文件名（而非空串）。root_name 为空时不 emit，避免无意义事件。
+                if !summary.root_name.is_empty() {
+                    emit_file_name(sink, summary.root_name, RsTransferDirection::Receive);
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                // 不可恢复错误：直接 Failed（原行为）。
+                if !e.is_recoverable() {
+                    tracing::warn!("Non-recoverable receive error, not retrying: {}", e);
+                    return Err(e.into());
+                }
+
+                // 可恢复错误但已达上限：返回错误，由外层 emit_final(Failed) 处理。
+                if !reconnect_config.should_retry(attempt) {
+                    tracing::warn!(
+                        "Max receive reconnection attempts ({}) reached: {}",
+                        reconnect_config.max_attempts,
+                        e
+                    );
+                    return Err(anyhow::anyhow!(
+                        "Receive failed after {} attempts: {}",
+                        attempt + 1,
+                        e
+                    ));
+                }
+
+                let delay = reconnect_config.backoff_delay(attempt);
+                tracing::warn!(
+                    "Recoverable receive error (attempt {}): {}. Retrying in {:?}...",
+                    attempt + 1,
+                    e,
+                    delay
+                );
+
+                tokio::time::sleep(delay).await;
+
+                // 接收方重连：重新 accept 等待对端建立新连接。
+                // reaccept 仅对 responder session 可用（LAN listen / rendezvous pair_receive 都是 responder）。
+                if let Err(reconnect_err) = session.reaccept().await {
+                    tracing::warn!("Failed to reaccept: {}", reconnect_err);
+                    return Err(reconnect_err.into());
+                }
+
+                // 重连后重新 emit peer_address，让 Dart 侧历史记录拿到新连接的对端地址。
+                emit_peer_address(sink, session.peer_addr().to_string());
+                attempt += 1;
+            }
+        }
     }
-    Ok(())
 }
 
 /// 发送 `path` 到对端，带断点续传状态文件。对应 mobile `send_path`。

@@ -414,6 +414,8 @@ class _UpdateProgressAction extends ReduxAction<TransferService, TransferState> 
       endTime: isDone ? DateTime.now() : null,
       errorMessage: event.message,
       peerFingerprint: event.peerFingerprint,
+      fileName: event.fileName ?? state.fileName,
+      peerAddress: event.peerAddress ?? state.peerAddress,
     );
   }
 }

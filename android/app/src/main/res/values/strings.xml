@@ -11,7 +11,7 @@
     <string name="mode_send">发送</string>
     <string name="mode_receive">接收</string>
     <string name="pair_lan">局域网发现</string>
-    <string name="pair_share">选择文件，生成配对二维码</string>
+    <string name="pair_share">选择文件发送</string>
     <string name="auto_listening_hint">正在监听 LAN 接收…</string>
 
     <!-- Logs -->

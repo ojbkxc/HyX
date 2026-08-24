@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeviceHub
 import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -25,10 +24,8 @@ import com.ojbkxc.hyx.R
 import com.ojbkxc.hyx.core.HyXCoreController
 import com.ojbkxc.hyx.ui.screens.DevicesScreen
 import com.ojbkxc.hyx.ui.screens.HistoryScreen
-import com.ojbkxc.hyx.ui.screens.TransferScreen
 
 enum class HyXTab(val route: String, val icon: ImageVector, val labelRes: Int) {
-    Transfer("transfer", Icons.Outlined.SwapVert, R.string.nav_transfer),
     Devices("devices", Icons.Outlined.DeviceHub, R.string.nav_devices),
     History("history", Icons.Outlined.History, R.string.nav_history)
 }
@@ -62,12 +59,9 @@ fun HyXNavigation(controller: HyXCoreController) {
     ) { padding ->
         NavHost(
             navController = nav,
-            startDestination = HyXTab.Transfer.route,
+            startDestination = HyXTab.Devices.route,
             modifier = Modifier.padding(padding)
         ) {
-            composable(HyXTab.Transfer.route) {
-                TransferScreen(controller)
-            }
             composable(HyXTab.Devices.route) { DevicesScreen(controller) }
             composable(HyXTab.History.route) { HistoryScreen(controller) }
         }

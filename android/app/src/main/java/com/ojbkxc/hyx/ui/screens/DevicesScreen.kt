@@ -20,6 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import android.net.Uri
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.DeviceHub
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Send
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
 import com.ojbkxc.hyx.R
 import com.ojbkxc.hyx.core.HyXCoreController
+import com.ojbkxc.hyx.core.LogCollector
 import com.ojbkxc.hyx.ui.components.StatusBadge
 import com.ojbkxc.hyx.ui.model.Device
 import com.ojbkxc.hyx.ui.theme.HyxGreen
@@ -58,6 +60,8 @@ import java.io.File
 fun DevicesScreen(controller: HyXCoreController) {
     val devices by controller.devices.collectAsState()
     val scanning by controller.devicesScanning.collectAsState()
+    val autoListening by controller.autoListening.collectAsState()
+    var showLogSheet by remember { mutableStateOf(false) }
 
     val online = devices.filter { it.online }
     val history = devices.filter { !it.online }
@@ -82,11 +86,24 @@ fun DevicesScreen(controller: HyXCoreController) {
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
-        Text(
-            stringResource(R.string.tab_devices_title),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                stringResource(R.string.tab_devices_title),
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { showLogSheet = true }) {
+                Icon(
+                    Icons.Outlined.Article,
+                    contentDescription = stringResource(R.string.log_title),
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+        }
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (scanning) {
@@ -99,6 +116,28 @@ fun DevicesScreen(controller: HyXCoreController) {
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        if (autoListening) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.tertiary,
+                            shape = CircleShape
+                        )
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    stringResource(R.string.auto_listening_hint),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
 
@@ -136,6 +175,13 @@ fun DevicesScreen(controller: HyXCoreController) {
                 }
             }
         }
+    }
+    if (showLogSheet) {
+        LogSheet(
+            logs = LogCollector.logs.collectAsState().value,
+            onClear = LogCollector::clear,
+            onDismiss = { showLogSheet = false }
+        )
     }
 }
 
