@@ -85,7 +85,7 @@ class HyXCoreController : ViewModel() {
     init {
         try {
             android.util.Log.d("R", "init")
-            loadSeedHistory()
+
             // Restore persisted devices (historical) before scanning so the 设备
             // tab shows both sections from the first frame.
             _devices.value = loadStoredDevices()

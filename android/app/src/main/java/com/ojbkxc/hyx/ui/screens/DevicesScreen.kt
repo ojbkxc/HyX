@@ -496,26 +496,28 @@ private fun OnlineStatusBadge(online: Boolean) {
 private fun AllowReceiveToggle(allowReceive: Boolean, onChanged: () -> Unit) {
     val label = stringResource(if (allowReceive) R.string.allow else R.string.block)
     val iconColor = if (allowReceive) HyxGreen else MaterialTheme.colorScheme.error
+    val bgColor = if (allowReceive) HyxGreen.copy(alpha = 0.12f) else MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(bgColor)
             .clickable(onClick = onChanged)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = if (allowReceive) Icons.Outlined.CheckCircle else Icons.Outlined.Block,
             contentDescription = null,
             tint = iconColor,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(20.dp)
         )
         Spacer(Modifier.size(8.dp))
         Text(
             label,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = iconColor
         )
         Spacer(Modifier.weight(1f))
         Switch(
