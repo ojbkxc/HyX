@@ -30,7 +30,7 @@ use hyx_core::DEFAULT_RENDEZVOUS_PORT;
 use tokio::runtime::{Builder, Runtime};
 use tokio::task::AbortHandle;
 
-use crate::api::device::{current_device_id, identity};
+use crate::api::device::{current_device_id, effective_device_name, identity};
 use crate::api::model::{RsProgressEvent, RsTransferDirection, RsTransferStatus};
 use crate::frb_generated::StreamSink;
 
@@ -411,7 +411,7 @@ pub fn start_listener(
         // 广播信标，便于发送方发现（best-effort）。
         let discovery = Arc::new(
             DiscoveryManager::new(
-                format!("hyx-{}", &current_device_id().to_string()[..6]),
+                effective_device_name(),
                 port_u16,
                 identity().fingerprint(),
                 current_device_id(),

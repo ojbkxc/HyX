@@ -15,7 +15,7 @@ use anyhow::Result;
 use flutter_rust_bridge::frb;
 use hyx_core::discovery::DiscoveryManager;
 
-use crate::api::device::{current_device_id, identity};
+use crate::api::device::{current_device_id, effective_device_name, identity};
 use crate::api::model::RsDiscoveredPeer;
 
 /// 发现 LAN 上的 HyX peer。
@@ -38,7 +38,7 @@ pub async fn discover(port: i32) -> Result<Vec<RsDiscoveredPeer>> {
         hyx_core::DEFAULT_TRANSFER_PORT
     };
 
-    let name = format!("hyx-{}", &current_device_id().to_string()[..6]);
+    let name = effective_device_name();
     let manager = match DiscoveryManager::new(
         name,
         port_u16,

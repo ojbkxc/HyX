@@ -78,6 +78,28 @@ fn device_id() -> Uuid {
     *DEVICE_ID.get_or_init(|| device_id_from_fingerprint(&identity().fingerprint()))
 }
 
+/// 用户自定义设备名称。`None` 时用默认 `hyx-{id前6位}`。
+///
+/// 与 FRB 侧 `device::CUSTOM_NAME` 等价：空串视为重置为默认名，
+/// 非空串（trim 后）作为 beacon 中携带的 device_name。
+/// 写入仅在 `hyxSetDeviceName` 调用时发生（低频），读取发生在每次
+/// `discover_peers` / `hyxStartListener` 构造 beacon 名称时。
+static CUSTOM_NAME: Mutex<Option<String>> = Mutex::new(None);
+
+/// 返回当前生效的设备名称（自定义优先，否则默认 `hyx-{id前6位}`）。
+///
+/// 供 `discover_peers` / `hyxStartListener` 统一调用，保证两处构造 beacon
+/// 名称的路径都用同一个名称源，避免漂移。与 FRB 侧
+/// `device::effective_device_name` 行为一致。
+fn effective_device_name() -> String {
+    let guard = CUSTOM_NAME.lock().expect("CUSTOM_NAME lock");
+    if let Some(ref n) = *guard {
+        return n.clone();
+    }
+    drop(guard);
+    format!("hyx-{}", &device_id().to_string()[..6])
+}
+
 /// Handle of the in-flight background transfer, so `hyxCancel` can abort it.
 static ACTIVE: Mutex<Option<AbortHandle>> = Mutex::new(None);
 
@@ -234,7 +256,7 @@ async fn send_path(
 /// No `JNIEnv` crosses any `await` point — the whole scan is awaited via
 /// `runtime().block_on`.
 async fn discover_peers(port: u16) -> String {
-    let name = format!("hyx-{}", &device_id().to_string()[..6]);
+    let name = effective_device_name();
     let manager = match DiscoveryManager::new(
         name,
         port,
@@ -505,6 +527,26 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxCreateDevice<'local
     }
 }
 
+/// `void hyxSetDeviceName(String name)` — 设置自定义设备名称。
+///
+/// 空串（trim 后）视为重置为默认名 `hyx-{id前6位}`。设置后后续
+/// `hyxDiscover` / `hyxStartListener` 广播的 beacon 都会携带新名称。
+/// 对应 FRB 侧 `set_device_name`。
+#[no_mangle]
+pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxSetDeviceName(
+    mut env: JNIEnv<'_>,
+    _class: JObject<'_>,
+    name: jni::objects::JString<'_>,
+) {
+    let s: String = env
+        .get_string(&name)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let trimmed = s.trim().to_string();
+    let mut guard = CUSTOM_NAME.lock().expect("CUSTOM_NAME lock");
+    *guard = if trimmed.is_empty() { None } else { Some(trimmed) };
+}
+
 /// `String hyxStartListener(int port, int chunkBytes, long fsyncEveryBytes,
 /// int compression, int aggregation, String saveDir, ProgressCallback cb)` —
 /// bind + accept + receive into `saveDir`. While listening, also broadcasts
@@ -534,7 +576,7 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxStartListener<'loca
         // already owns the discovery port) must not block receiving.
         let discovery = Arc::new(
             DiscoveryManager::new(
-                format!("hyx-{}", &device_id().to_string()[..6]),
+                effective_device_name(),
                 port as u16,
                 identity().fingerprint(),
                 device_id(),
