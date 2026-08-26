@@ -10,6 +10,7 @@ import android.bluetooth.le.BluetoothLeAdvertiser
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
@@ -95,7 +96,13 @@ internal class BleSharingManager(
             val a = adapter ?: return
             val s = a.bluetoothLeScanner ?: return
             scanner = s
-            s.startScan(scanCallback)
+            // 低功耗扫描（对齐 btleplug 的 low-energy 策略，节能并减少无关回调）。
+            // 不做 serviceUuid 过滤：广告 UUID 携带 IP 后缀，无法按固定前缀精确匹配，
+            // 前缀识别放在 onScanResult 的 decode 阶段完成。
+            val settings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+                .build()
+            s.startScan(settings, scanCallback)
         } catch (t: Throwable) {
             android.util.Log.w("BleSharing", "BLE scan failed: ${t.message}")
         }
