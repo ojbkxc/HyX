@@ -124,6 +124,13 @@ class DeviceState {
   /// 是否已从持久化加载过已知设备。
   final bool knownLoaded;
 
+  /// 蓝牙扫描到的候选对端 IP（同网段跨子网的补充发现通道）。
+  ///
+  /// 只负责"给出可能可达的 IP"，不代表在线。每次 [RefreshPeersAction] 都会对
+  /// 这些 IP 做 Rust 单播探测：有回应 → 并入 [peers]（在线），无回应 → 不出现在
+  /// 在线列表（离线）。蓝牙不参与在线判定。
+  final Set<String> bluetoothCandidates;
+
   const DeviceState({
     this.scanning = false,
     this.peers = const [],
@@ -131,6 +138,7 @@ class DeviceState {
     this.myDevice,
     this.autoDiscovery = true,
     this.knownLoaded = false,
+    this.bluetoothCandidates = const {},
   });
 
   DeviceState copyWith({
@@ -140,6 +148,7 @@ class DeviceState {
     model.RsDevice? myDevice,
     bool? autoDiscovery,
     bool? knownLoaded,
+    Set<String>? bluetoothCandidates,
   }) =>
       DeviceState(
         scanning: scanning ?? this.scanning,
@@ -148,6 +157,7 @@ class DeviceState {
         myDevice: myDevice ?? this.myDevice,
         autoDiscovery: autoDiscovery ?? this.autoDiscovery,
         knownLoaded: knownLoaded ?? this.knownLoaded,
+        bluetoothCandidates: bluetoothCandidates ?? this.bluetoothCandidates,
       );
 
   /// 历史设备列表：knownDevices 中不在当前 peers 里的设备，按 lastSeen 倒序。
@@ -325,6 +335,21 @@ class RefreshPeersAction extends AsyncReduxAction<DeviceService, DeviceState> {
       for (final p in peers) {
         map[p.deviceId.toString()] = p;
       }
+
+      // 跨子网补充：对蓝牙候选 IP 依次做 Rust 单播探测，有响应则并入在线列表。
+      // 这一步保证蓝牙发现的设备与局域网发现共用同一"在线/离线"判定——每次刷新
+      // 都重新探测，无响应的候选自然不出现在在线列表里。
+      for (final ip in state.bluetoothCandidates) {
+        if (map.values.any((p) => p.addr.startsWith('$ip:'))) continue;
+        try {
+          final r = await rust_discovery.probePeer(ip: ip);
+          if (r != null) {
+            map[r.deviceId.toString()] = r;
+          }
+        } catch (e) {
+          _logger.warning('probe bluetooth candidate $ip failed: $e');
+        }
+      }
       final dedupPeers = map.values.toList();
 
       // 合并到 knownDevices：更新在线设备的 name/addr/lastSeen，新设备自动加入。
@@ -434,8 +459,34 @@ class ToggleAutoDiscoveryAction extends ReduxAction<DeviceService, DeviceState> 
   }
 }
 
-/// 更新已知设备的 fingerprint（TOFU 连接成功后回传）。
+/// 把蓝牙扫描到的候选对端 IP 并入候选池。
 ///
+/// 蓝牙只负责"交换 IP"，不判定在线。合并后立即触发一次 [RefreshPeersAction]，
+/// 让新候选尽快被 Rust 单播探测，有回应的对端随即进入在线列表。
+class AddBluetoothCandidatesAction extends ReduxAction<DeviceService, DeviceState> {
+  final Set<String> ips;
+
+  AddBluetoothCandidatesAction(this.ips);
+
+  @override
+  DeviceState reduce() {
+    if (ips.isEmpty) return state;
+    final next = Set<String>.from(state.bluetoothCandidates)..addAll(ips);
+    dispatch(RefreshPeersAction());
+    return state.copyWith(bluetoothCandidates: next);
+  }
+}
+
+/// 清空蓝牙候选池（蓝牙关闭/离开时调用）。
+class ClearBluetoothCandidatesAction extends ReduxAction<DeviceService, DeviceState> {
+  @override
+  DeviceState reduce() {
+    if (state.bluetoothCandidates.isEmpty) return state;
+    return state.copyWith(bluetoothCandidates: const {});
+  }
+}
+
+/// 更新已知设备的 fingerprint（TOFU 连接成功后回传）。
 /// 由 [TransferService] 的 `_UpdateProgressAction` 在收到 `RsProgressEvent.peerFingerprint`
 /// 非空时触发：TOFU 路径握手成功后，Rust 侧把对端实际指纹 hex 回传，Dart 侧据此
 /// 更新对应 `KnownDevice.fingerprint` 并持久化，后续连接直接 pin 跳过 UDP 发现。

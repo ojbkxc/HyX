@@ -3,14 +3,19 @@
 use crate::error::Result;
 use crate::identity::Fingerprint;
 use crate::network::udp::{DiscoveryService, PeerInfo};
+use crate::DEFAULT_DISCOVERY_PORT;
 use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
+
+/// 对同一来源 IP 回发单播信标的最短间隔，防止不同路由间回声引发 ping-pong 风暴。
+const ECHO_THROTTLE: Duration = Duration::from_secs(2);
 
 /// Peer discovery manager
 pub struct DiscoveryManager {
@@ -18,6 +23,8 @@ pub struct DiscoveryManager {
     peers: Arc<RwLock<HashMap<Uuid, PeerInfo>>>,
     peer_ttl: Duration,
     task_handles: Mutex<Option<Vec<JoinHandle<()>>>>,
+    /// 上次对某来源 IP 回发单播信标的时间，用于节流。
+    last_echo: Arc<Mutex<HashMap<IpAddr, Instant>>>,
 }
 
 impl DiscoveryManager {
@@ -40,6 +47,7 @@ impl DiscoveryManager {
             peers: Arc::new(RwLock::new(HashMap::new())),
             peer_ttl,
             task_handles: Mutex::new(None),
+            last_echo: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -75,6 +83,7 @@ impl DiscoveryManager {
             let service = Arc::clone(&self.service);
             let peers = Arc::clone(&self.peers);
             let our_device_id = service.device_id();
+            let last_echo = Arc::clone(&self.last_echo);
 
             tokio::spawn(async move {
                 loop {
@@ -86,6 +95,31 @@ impl DiscoveryManager {
                             }
 
                             let ip = src_addr.ip();
+                            // 回声应答：向来源地址单播回发本机信标（按 IP 节流），
+                            // 让跨子网的单播探测端能收到回应。同一 IP 在节流窗口内
+                            // 只回一次，避免多播源触发反复回声 ping-pong。跨子网时
+                            // 多播到不了对端，必须用这个单播回声才能确认在线。
+                            let should_echo = {
+                                let mut m = last_echo.lock().expect("last_echo lock");
+                                let now = Instant::now();
+                                if m.get(&ip)
+                                    .is_none_or(|last| now.duration_since(*last) >= ECHO_THROTTLE)
+                                {
+                                    m.insert(ip, now);
+                                    true
+                                } else {
+                                    false
+                                }
+                            };
+                            if should_echo {
+                                let s = Arc::clone(&service);
+                                tokio::spawn(async move {
+                                    if let Err(e) = s.send_unicast_beacon(src_addr).await {
+                                        warn!("Failed to echo unicast beacon to {}: {}", src_addr, e);
+                                    }
+                                });
+                            }
+
                             let peer_info = PeerInfo::from((beacon.clone(), ip));
 
                             let mut peers_lock = peers.write().await;
@@ -175,6 +209,26 @@ impl DiscoveryManager {
             .values()
             .find(|p| p.device_name.to_lowercase().contains(&name.to_lowercase()))
             .cloned()
+    }
+
+    /// 向指定 IP 的单播探测：单播本机信标到其发现端口，等待对端回声，
+    /// 超时（~1.5s）内收到回应的对端即视为在线。
+    ///
+    /// 这是跨子网发现的探测通道：蓝牙只负责把候选 IP 交进来（见
+    /// `hyx_isolates` 的 `probe_peer`），在线与否完全由这里的单播探测决定。
+    /// 对端通过接收循环里的回声逻辑回发本机信标，本机据此把它加入 peers 表。
+    pub async fn probe_peer(&self, target: IpAddr) -> Result<Option<PeerInfo>> {
+        let addr = SocketAddr::new(target, DEFAULT_DISCOVERY_PORT);
+        self.service.send_unicast_beacon(addr).await?;
+        // 轮询 peers 表最多 ~1.5s，等对端回声被接收循环加入。
+        for _ in 0..10 {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let peers = self.peers.read().await;
+            if let Some(p) = peers.values().find(|p| p.address == target) {
+                return Ok(Some(p.clone()));
+            }
+        }
+        Ok(None)
     }
 
     /// Get our device ID

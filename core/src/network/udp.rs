@@ -273,6 +273,61 @@ impl DiscoveryService {
     pub fn device_name(&self) -> &str {
         &self.device_name
     }
+
+    /// 向指定地址单播发送本机信标。
+    ///
+    /// 用于跨子网探测：不同网段间多播无法互通，但单播 UDP 可以在路由可达的
+    /// 局域网内到达对端。接收方收到后会对来源地址回发单播信标（回声），
+    /// 探测端据此确认对端在线并拿到完整身份（device_id/指纹/名称）。
+    pub async fn send_unicast_beacon(&self, target: SocketAddr) -> Result<()> {
+        let beacon = self.create_beacon();
+        let data = rmp_serde::to_vec(&beacon)?;
+        if data.len() > MAX_PACKET_SIZE {
+            return Err(Error::Protocol(format!(
+                "Beacon too large: {} bytes",
+                data.len()
+            )));
+        }
+        for socket in &self.sockets {
+            if let Err(e) = socket.send_to(&data, target).await {
+                warn!("Failed to send unicast beacon to {}: {}", target, e);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// 返回第一个合适的非虚拟 IPv4 局域网接口地址。
+///
+/// 与 [`list_multicast_interfaces_ipv4`] 使用相同的过滤规则，供蓝牙分享本机 IP、
+/// 或者其它需要对外广播本机可达地址的场景使用。
+pub fn local_ipv4() -> Option<IpAddr> {
+    let ifaces = if_addrs::get_if_addrs().ok()?;
+    for iface in &ifaces {
+        if let if_addrs::IfAddr::V4(v4) = &iface.addr {
+            if v4.ip.is_loopback() {
+                continue;
+            }
+            if looks_virtual(&iface.name) {
+                continue;
+            }
+            return Some(IpAddr::V4(v4.ip));
+        }
+    }
+    None
+}
+
+/// 判断接口名是否明显是虚拟网桥/虚拟适配器。
+fn looks_virtual(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.starts_with("docker")
+        || n.starts_with("veth")
+        || n.starts_with("vbox")
+        || n.starts_with("vmnet")
+        || n.starts_with("virbr")
+        || n.starts_with("br-")
+        || n.starts_with("tap")
+        || n == "lo"
 }
 
 /// 列出所有适合加入多播组的 IPv4 接口地址。
@@ -292,18 +347,6 @@ fn list_multicast_interfaces_ipv4() -> Vec<Ipv4Addr> {
             warn!("get_if_addrs failed: {}, 多播发现可能不工作", e);
             return Vec::new();
         }
-    };
-
-    let looks_virtual = |name: &str| {
-        let n = name.to_ascii_lowercase();
-        n.starts_with("docker")
-            || n.starts_with("veth")
-            || n.starts_with("vbox")
-            || n.starts_with("vmnet")
-            || n.starts_with("virbr")
-            || n.starts_with("br-")
-            || n.starts_with("tap")
-            || n == "lo"
     };
 
     let mut result = Vec::new();
