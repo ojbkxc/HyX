@@ -75,6 +75,12 @@ class HyXCoreController : ViewModel() {
     // 周期重探测协程只启动一次（BLE 权限可能在启动后授予，届时需再调 startBleDiscovery）。
     private var bleLoopStarted = false
 
+    // ---- Wi-Fi Direct 直连（对齐小米互传：无热点也能点对点互传）----
+    // P2P 负责"建一条直连链路 + 拿到对端 P2P IP"，在线与否/传文件仍走 hyxProbeIp + QUIC。
+    private val _wifiDirectEnabled = MutableStateFlow(false)
+    val wifiDirectEnabled: StateFlow<Boolean> = _wifiDirectEnabled.asStateFlow()
+    private val wifiDirectManager = WifiDirectManager { ip -> onWifiDirectCandidates(ip) }
+
     // Speed of progress updates is throttled by the Rust side; no EMA here yet.
     private var transferJob: Job? = null
     private var transferStartedMs = 0L
@@ -479,6 +485,40 @@ class HyXCoreController : ViewModel() {
         return base
     }
 
+    // ---------------------------------------------------------------------
+    // Wi-Fi Direct 直连（补充通道）
+    // ---------------------------------------------------------------------
+
+    /**
+     * 开关 Wi-Fi Direct 直连。开启：注册 P2P 广播 + 发现 + 自动建组（无需连热点）；
+     * 关闭：退订广播并保留已发现设备（下次探测离线自动降级为历史）。
+     */
+    fun setWifiDirectEnabled(enabled: Boolean) {
+        android.util.Log.d("R", "setWifiDirectEnabled=$enabled")
+        _wifiDirectEnabled.value = enabled
+        if (enabled) {
+            val ctx = HyXNative.appContext ?: return
+            try {
+                wifiDirectManager.start(ctx)
+            } catch (t: Throwable) {
+                android.util.Log.e("HyXCoreController", "wifiDirect start failed", t)
+            }
+        } else {
+            try {
+                wifiDirectManager.stop()
+            } catch (t: Throwable) {
+                android.util.Log.e("HyXCoreController", "wifiDirect stop failed", t)
+            }
+        }
+    }
+
+    /** Wi-Fi Direct 解析到对端 P2P IP：复用与 BLE 相同的候选去重 + 单播探测裁决在线。 */
+    private fun onWifiDirectCandidates(ip: String) {
+        if (ip.isBlank()) return
+        if (!bleCandidates.add(ip)) return
+        viewModelScope.launch(Dispatchers.IO) { probeIpAndMerge(ip) }
+    }
+
     /** Parse one `name\tip:port\tdevice_id` discovery line into a [Device]. */
     private fun parsePeerLine(line: String): Device? {
         android.util.Log.d("R", "parsePeerLine")
@@ -763,6 +803,7 @@ class HyXCoreController : ViewModel() {
         bleProbeJob?.cancel()
         bleProbeJob = null
         try { bleManager.stop() } catch (t: Throwable) { android.util.Log.w("HyXCoreController", "ble stop failed", t) }
+        try { wifiDirectManager.stop() } catch (t: Throwable) { android.util.Log.w("HyXCoreController", "wifiDirect stop failed", t) }
         transferJob?.cancel()
         if (_status.value in setOf(TransferStatus.Connecting, TransferStatus.Pairing, TransferStatus.Transferring)) {
             // cancel() only aborts the coroutine; a transfer currently blocked

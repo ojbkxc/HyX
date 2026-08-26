@@ -36,10 +36,13 @@ class MainActivity : ComponentActivity() {
     // Single activity-scoped ViewModel shared by all three tabs.
     private val controller: HyXCoreController by viewModels()
 
-    // 蓝牙权限授权回调：授权后重新尝试启动蓝牙跨子网发现（此前因缺权限静默失败）。
+    // 蓝牙/Wi-Fi 直连权限授权回调：授权后重新尝试启动（此前因缺权限静默失败）。
     private val blePermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { controller.startBleDiscovery() }
+    ) {
+        controller.startBleDiscovery()
+        if (controller.wifiDirectEnabled.value) controller.setWifiDirectEnabled(true)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,16 +87,20 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 请求蓝牙跨子网发现所需权限：Android 12+ 需要 BLUETOOTH_SCAN / BLUETOOTH_ADVERTISE；
-     * 更早版本 BLE 扫描依赖定位权限（已声明于 manifest）。授权后 [blePermLauncher] 会
-     * 重新触发 [HyXCoreController.startBleDiscovery] 真正启动蓝牙广播/扫描。
+     * 请求直连发现所需权限：Android 12+ 需要 BLUETOOTH_SCAN / BLUETOOTH_ADVERTISE，
+     * Android 13+ 的 Wi-Fi Direct 发现还需 NEARBY_WIFI_DEVICES；更早版本依赖定位权限
+     * （已声明于 manifest）。授权后 [blePermLauncher] 会重新触发蓝牙广播/扫描，并
+     * 在用户已开启 Wi-Fi 直连开关时重试启动（此前因缺权限静默失败）。
      */
     private fun requestBlePermissions() {
         val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_ADVERTISE
-            )
+            buildList {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_ADVERTISE)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    add(Manifest.permission.NEARBY_WIFI_DEVICES)
+                }
+            }.toTypedArray()
         } else {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
@@ -104,6 +111,7 @@ class MainActivity : ComponentActivity() {
             blePermLauncher.launch(missing.toTypedArray())
         } else {
             controller.startBleDiscovery()
+            if (controller.wifiDirectEnabled.value) controller.setWifiDirectEnabled(true)
         }
     }
 

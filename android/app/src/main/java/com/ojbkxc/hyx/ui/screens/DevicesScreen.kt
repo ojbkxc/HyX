@@ -83,6 +83,7 @@ fun DevicesScreen(controller: HyXCoreController, onNavigateToSettings: () -> Uni
     val devices by controller.devices.collectAsState()
     val scanning by controller.devicesScanning.collectAsState()
     val autoListening by controller.autoListening.collectAsState()
+    val wifiDirectEnabled by controller.wifiDirectEnabled.collectAsState()
     var showLogSheet by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Device?>(null) }
 
@@ -148,6 +149,23 @@ fun DevicesScreen(controller: HyXCoreController, onNavigateToSettings: () -> Uni
                     tint = MaterialTheme.colorScheme.onBackground
                 )
             }
+        }
+
+        // Wi-Fi 直连开关：无需连热点，两台设备都开启即可自动建 P2P 组互相发现。
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Wi-Fi 直连（无热点互传）",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = wifiDirectEnabled,
+                onCheckedChange = { controller.setWifiDirectEnabled(it) }
+            )
         }
 
         // 自动监听指示。
