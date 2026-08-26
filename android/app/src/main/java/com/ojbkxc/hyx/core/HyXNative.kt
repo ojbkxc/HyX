@@ -107,6 +107,9 @@ object HyXNative {
     /** Real LAN discovery; returns newline-joined `"name\tip:port"` lines ("" if none found). */
     external fun hyxDiscover(port: Int): String?
 
+    /** 设置自定义设备名称（空串重置为默认名）。 */
+    external fun hyxSetDeviceName(name: String)
+
     /**
      * Register a global Rust log callback. Must be called after [ensureLoaded]
      * (i.e. once `libhyx_mobile.so` is loaded) and before any other native call

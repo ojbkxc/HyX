@@ -31,6 +31,7 @@ import com.ojbkxc.hyx.ui.model.TransferProgress
 import com.ojbkxc.hyx.ui.model.TransferStatus
 import com.ojbkxc.hyx.ui.screens.DevicesScreen
 import com.ojbkxc.hyx.ui.screens.HistoryScreen
+import com.ojbkxc.hyx.ui.screens.SettingsScreen
 import com.ojbkxc.hyx.ui.screens.TransferProgressSheet
 import kotlinx.coroutines.delay
 
@@ -107,8 +108,16 @@ fun HyXNavigation(controller: HyXCoreController) {
             startDestination = HyXTab.Devices.route,
             modifier = Modifier.padding(padding)
         ) {
-            composable(HyXTab.Devices.route) { DevicesScreen(controller) }
+            composable(HyXTab.Devices.route) {
+                DevicesScreen(
+                    controller,
+                    onNavigateToSettings = { nav.navigate("settings") }
+                )
+            }
             composable(HyXTab.History.route) { HistoryScreen(controller) }
+            composable("settings") {
+                SettingsScreen(controller, onBack = { nav.popBackStack() })
+            }
         }
 
         // 传输进度浮层：有快照时才显示。

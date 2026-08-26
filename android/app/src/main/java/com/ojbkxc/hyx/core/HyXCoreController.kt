@@ -91,6 +91,9 @@ class HyXCoreController : ViewModel() {
             // Restore persisted devices (historical) before scanning so the 设备
             // tab shows both sections from the first frame.
             _devices.value = loadStoredDevices()
+            // 同步持久化的自定义设备名称到 Rust 侧（必须在 discover/listen 之前，
+            // 这样 beacon 携带的 device_name 才是用户自定义名）。
+            loadCustomName()
             startDiscovery()
             // 自动监听接收：应用启动即监听 14567 端口，对齐 Flutter app 的 StartAutoListenAction。
             // 传输完成后自动重启监听（持续接收），无需用户手动切接收模式 + 点开始接收。
@@ -221,6 +224,43 @@ class HyXCoreController : ViewModel() {
     companion object {
         private const val DEV_STORE = "hyx_device_store"
         private const val DEV_KEY = "devices"
+        private const val PREF_CUSTOM_NAME = "hyx_custom_device_name"
+        private const val PREFS_NAME = "hyx_prefs"
+    }
+
+    /** 加载持久化的自定义设备名称并同步到 Rust 侧。在 init 块中调用。 */
+    private fun loadCustomName() {
+        try {
+            val prefs = HyXNative.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val name = prefs?.getString(PREF_CUSTOM_NAME, "") ?: ""
+            if (name.isNotEmpty() && HyXNative.isLoaded) {
+                HyXNative.hyxSetDeviceName(name)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.e("HyXCoreController", "loadCustomName failed", t)
+        }
+    }
+
+    /** 设置自定义设备名称并持久化。 */
+    fun setCustomName(name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val trimmed = name.trim()
+                if (HyXNative.isLoaded) {
+                    HyXNative.hyxSetDeviceName(trimmed)
+                }
+                val prefs = HyXNative.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                prefs?.edit()?.putString(PREF_CUSTOM_NAME, trimmed)?.apply()
+            } catch (t: Throwable) {
+                android.util.Log.e("HyXCoreController", "setCustomName failed", t)
+            }
+        }
+    }
+
+    /** 获取当前持久化的自定义名称（空串表示未设置）。 */
+    fun getCustomName(): String {
+        val prefs = HyXNative.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs?.getString(PREF_CUSTOM_NAME, "") ?: ""
     }
 
     fun onDirectionChange(d: TransferDirection) {

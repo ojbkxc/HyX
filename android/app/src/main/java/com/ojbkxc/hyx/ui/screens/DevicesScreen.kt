@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DevicesOther
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -78,7 +79,7 @@ import java.io.File
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DevicesScreen(controller: HyXCoreController) {
+fun DevicesScreen(controller: HyXCoreController, onNavigateToSettings: () -> Unit = {}) {
     val devices by controller.devices.collectAsState()
     val scanning by controller.devicesScanning.collectAsState()
     val autoListening by controller.autoListening.collectAsState()
@@ -137,6 +138,13 @@ fun DevicesScreen(controller: HyXCoreController) {
                 Icon(
                     Icons.Outlined.Article,
                     contentDescription = stringResource(R.string.log_title),
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+            IconButton(onClick = onNavigateToSettings) {
+                Icon(
+                    Icons.Outlined.Settings,
+                    contentDescription = "设置",
                     tint = MaterialTheme.colorScheme.onBackground
                 )
             }
