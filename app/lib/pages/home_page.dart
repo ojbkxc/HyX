@@ -177,6 +177,7 @@ class _HomePageState extends State<HomePage> with Refena {
               device: d,
               online: true,
               onTap: () => _sendToPeer(context, d),
+              onToggleAllowReceive: () => _toggleAllow(context, d.deviceId),
             ),
           ),
         );
@@ -216,6 +217,7 @@ class _HomePageState extends State<HomePage> with Refena {
               child: DeviceCard(
                 device: d,
                 online: false,
+                onToggleAllowReceive: () => _toggleAllow(context, d.deviceId),
               ),
             ),
           ),
@@ -384,6 +386,11 @@ class _HomePageState extends State<HomePage> with Refena {
         ),
       );
     }
+  }
+
+  /// 切换设备的接收/禁止状态。
+  void _toggleAllow(BuildContext context, String deviceId) {
+    unawaited(context.redux(deviceProvider).dispatchAsync(ToggleAllowReceiveAction(deviceId)));
   }
 
   /// 弹出传输进度浮层。
