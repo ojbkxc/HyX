@@ -142,9 +142,10 @@ internal class WifiDirectManager(
         val c = channel ?: return
         try {
             m.requestPeers(c) { peers ->
-                if (peers.isNullOrEmpty()) return@requestPeers
-                val peer = peers.firstOrNull { it.status == WifiP2pDevice.AVAILABLE }
-                    ?: peers.first()
+                val deviceList = peers.deviceList
+                if (deviceList.isEmpty()) return@requestPeers
+                val peer = deviceList.firstOrNull { it.status == WifiP2pDevice.AVAILABLE }
+                    ?: deviceList.first()
                 if (peer.deviceAddress.isNullOrBlank()) return@requestPeers
                 ensureRole(peer.deviceAddress)
             }
