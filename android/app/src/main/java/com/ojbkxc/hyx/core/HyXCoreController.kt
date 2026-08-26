@@ -19,6 +19,7 @@ import com.ojbkxc.hyx.ui.model.TransferDirection
 import com.ojbkxc.hyx.ui.model.TransferProgress
 import com.ojbkxc.hyx.ui.model.TransferStatus
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -62,6 +63,18 @@ class HyXCoreController : ViewModel() {
     private val _autoListening = MutableStateFlow(false)
     val autoListening: StateFlow<Boolean> = _autoListening.asStateFlow()
 
+    // ---- 蓝牙跨子网发现（补充通道，对齐 Flutter 的 ble_sharing + 候选池）----
+    // BLE 只负责"交换 IP"，在线与否由 Rust 单播探测（hyxProbeIp）决定。
+    private val bleManager = BleSharingManager { ip -> onBluetoothCandidates(ip) }
+    // 扫描到的候选对端 IP（并发安全），用于去重 + 周期重探测。
+    private val bleCandidates = ConcurrentHashMap.newKeySet<String>()
+    // 蓝牙单播探测确认在线的设备（key= deviceId）。跨子网发现的在线设备并入在线判定。
+    private val bleOnline = ConcurrentHashMap<String, Device>()
+    // 周期重探测协程 job；onCleared 时取消。
+    private var bleProbeJob: Job? = null
+    // 周期重探测协程只启动一次（BLE 权限可能在启动后授予，届时需再调 startBleDiscovery）。
+    private var bleLoopStarted = false
+
     // Speed of progress updates is throttled by the Rust side; no EMA here yet.
     private var transferJob: Job? = null
     private var transferStartedMs = 0L
@@ -98,6 +111,7 @@ class HyXCoreController : ViewModel() {
             // 自动监听接收：应用启动即监听 14567 端口，对齐 Flutter app 的 StartAutoListenAction。
             // 传输完成后自动重启监听（持续接收），无需用户手动切接收模式 + 点开始接收。
             startAutoListen()
+            startBleDiscovery()
         } catch (t: Throwable) {
             android.util.Log.e("HyXCoreController", "init block failed", t)
         }
@@ -371,14 +385,98 @@ class HyXCoreController : ViewModel() {
                     .lineSequence()
                     .filter { it.isNotBlank() }
                     .mapNotNull { parsePeerLine(it) }
-                    .toList()
-                mergeDevices(nowOnline)
+                    .toMutableList()
+                // 并入蓝牙确认在线的设备（跨子网），避免 LAN 刷新把它们降级为历史。
+                mergeDevices(mergeDeviceSets(nowOnline, bleOnline.values))
             } catch (t: Throwable) {
                 android.util.Log.e("HyXCoreController", "startDiscovery failed", t)
             } finally {
                 _devicesScanning.value = false
             }
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // 蓝牙跨子网发现（补充通道）
+    // ---------------------------------------------------------------------
+
+    /**
+     * 启动蓝牙跨子网发现：广播本机 IP + 扫描邻居 IP，并对蓝牙候选 IP 周期性重探测。
+     * [BleSharingManager.start] 幂等且对缺权限静默跳过，因此权限授予后可从
+     * MainActivity 再次调用以真正启动 BLE；周期重探测协程只启动一次。
+     */
+    fun startBleDiscovery() {
+        android.util.Log.d("R", "startBleDiscovery")
+        try {
+            val ctx = HyXNative.appContext ?: return
+            bleManager.start(ctx)
+        } catch (t: Throwable) {
+            android.util.Log.e("HyXCoreController", "startBleDiscovery(ble) failed", t)
+        }
+        if (bleLoopStarted) return
+        bleLoopStarted = true
+        bleProbeJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(5000)
+                probeBluetoothCandidates()
+            }
+        }
+    }
+
+    /** 蓝牙扫描到新候选 IP：首次见面立即单播探测并入在线判定（BLE 回调线程）。 */
+    private fun onBluetoothCandidates(ip: String) {
+        if (ip.isBlank()) return
+        if (!bleCandidates.add(ip)) return
+        viewModelScope.launch(Dispatchers.IO) { probeIpAndMerge(ip) }
+    }
+
+    /** 周期重探测所有蓝牙候选 IP：在线保持/并入，离线降级为历史。 */
+    private fun probeBluetoothCandidates() {
+        for (ip in bleCandidates) probeIpAndMerge(ip)
+    }
+
+    /**
+     * 单播探测一个候选 IP。在线：并入 [bleOnline] 并刷新设备列表；离线：
+     * 从 [bleOnline] 移除对应该 IP 的设备（降级为历史），下次刷新不再出现在在线区。
+     */
+    private fun probeIpAndMerge(ip: String) {
+        if (!HyXNative.isLoaded) return
+        try {
+            // 同一 IP 已有设备在线（LAN 或之前蓝牙探到），跳过重复探测。
+            if (_devices.value.any { it.online && it.address?.substringBefore(':') == ip }) return
+            val raw = HyXNative.hyxProbeIp(ip, 14567)
+            if (raw.isNullOrBlank()) {
+                // 离线：移除该 IP 对应的蓝牙在线设备，触发在线列表重算。
+                val removed = bleOnline.entries
+                    .filter { it.value.address?.substringBefore(':') == ip }
+                    .map { it.key }
+                if (removed.isNotEmpty()) {
+                    removed.forEach { bleOnline.remove(it) }
+                    applyBleOnline()
+                }
+                return
+            }
+            val peer = parsePeerLine(raw) ?: return
+            bleOnline[peer.id] = peer
+            applyBleOnline()
+        } catch (t: Throwable) {
+            android.util.Log.e("HyXCoreController", "probe ip $ip failed", t)
+        }
+    }
+
+    /** 把蓝牙确认在线的设备并入当前在线判定（不降级已有的 LAN 在线设备）。 */
+    private fun applyBleOnline() {
+        val current = _devices.value
+        mergeDevices(mergeDeviceSets(current.filter { it.online }.toMutableList(), bleOnline.values))
+    }
+
+    /** 把 [base] 与 [extra] 按 deviceId 去重合并，[extra] 里的新设备追加到末尾。 */
+    private fun mergeDeviceSets(base: MutableList<Device>, extra: Collection<Device>): List<Device> {
+        val ids = base.map { it.id }.toHashSet()
+        for (d in extra) {
+            if (ids.add(d.id)) base.add(d)
+        }
+        return base
     }
 
     /** Parse one `name\tip:port\tdevice_id` discovery line into a [Device]. */
@@ -662,6 +760,9 @@ class HyXCoreController : ViewModel() {
 
     override fun onCleared() {
         android.util.Log.d("R", "onCleared")
+        bleProbeJob?.cancel()
+        bleProbeJob = null
+        try { bleManager.stop() } catch (t: Throwable) { android.util.Log.w("HyXCoreController", "ble stop failed", t) }
         transferJob?.cancel()
         if (_status.value in setOf(TransferStatus.Connecting, TransferStatus.Pairing, TransferStatus.Transferring)) {
             // cancel() only aborts the coroutine; a transfer currently blocked

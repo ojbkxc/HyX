@@ -1,11 +1,15 @@
 package com.ojbkxc.hyx
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.Manifest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -32,10 +36,15 @@ class MainActivity : ComponentActivity() {
     // Single activity-scoped ViewModel shared by all three tabs.
     private val controller: HyXCoreController by viewModels()
 
+    // 蓝牙权限授权回调：授权后重新尝试启动蓝牙跨子网发现（此前因缺权限静默失败）。
+    private val blePermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { controller.startBleDiscovery() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestBlePermissions()
         setContent {
             HyXTheme {
                 // 更新检测：发现新版本时弹窗提示下载。
@@ -72,6 +81,30 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShareIntent(intent)
+    }
+
+    /**
+     * 请求蓝牙跨子网发现所需权限：Android 12+ 需要 BLUETOOTH_SCAN / BLUETOOTH_ADVERTISE；
+     * 更早版本 BLE 扫描依赖定位权限（已声明于 manifest）。授权后 [blePermLauncher] 会
+     * 重新触发 [HyXCoreController.startBleDiscovery] 真正启动蓝牙广播/扫描。
+     */
+    private fun requestBlePermissions() {
+        val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_ADVERTISE
+            )
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val missing = perms.filter {
+            checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            blePermLauncher.launch(missing.toTypedArray())
+        } else {
+            controller.startBleDiscovery()
+        }
     }
 
     /**

@@ -107,6 +107,12 @@ object HyXNative {
     /** Real LAN discovery; returns newline-joined `"name\tip:port"` lines ("" if none found). */
     external fun hyxDiscover(port: Int): String?
 
+    /**
+     * 对指定 IP 单播探测对端是否在线（跨子网发现）。在线返回 `"name\tip:port\tdevice_id"`，
+     * 离线/失败返回空串。由蓝牙层在读到邻居候选 IP 后调用，以决定其在线状态。
+     */
+    external fun hyxProbeIp(ip: String, port: Int): String?
+
     /** 设置自定义设备名称（空串重置为默认名）。 */
     external fun hyxSetDeviceName(name: String)
 

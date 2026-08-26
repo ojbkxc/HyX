@@ -980,6 +980,42 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxPairSend<'local>(
     out
 }
 
+/// 单播探测单个对端 IP（跨子网发现的探测通道）。蓝牙只负责把候选 IP 交进来
+/// （见 `BleSharingManager`），在线与否完全由这里的单播信标探测决定：对端在
+/// ~1.5s 内回发单播信标则返回其完整身份 `"name\tip:port\tdevice_id"`，否则返回空串。
+async fn probe_ip(ip: &str, port: u16) -> String {
+    let target: IpAddr = match ip.parse() {
+        Ok(a) => a,
+        Err(_) => return String::new(),
+    };
+    let manager = match DiscoveryManager::new(
+        effective_device_name(),
+        port,
+        identity().fingerprint(),
+        device_id(),
+        Duration::from_secs(60),
+    )
+    .await
+    {
+        Ok(m) => Arc::new(m),
+        Err(e) => {
+            tracing::warn!("discovery manager failed: {e}");
+            return String::new();
+        }
+    };
+    if let Err(e) = manager.start().await {
+        tracing::warn!("discovery start failed: {e}");
+        return String::new();
+    }
+    let peer = match manager.probe_peer(target).await {
+        Ok(Some(p)) => Some(p),
+        _ => None,
+    };
+    manager.stop();
+    peer.map(|p| format!("{}\t{}\t{}", p.device_name, p.socket_addr(), p.device_id))
+        .unwrap_or_default()
+}
+
 /// `String hyxCancel()` — abort the in-flight transfer.
 #[no_mangle]
 pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxCancel<'local>(
@@ -1001,6 +1037,25 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxDiscover<'local>(
     port: jint,
 ) -> jobject {
     let result = runtime().block_on(discover_peers(if port > 0 { port as u16 } else { 14567 }));
+    new_jstring(&mut env, &result)
+}
+
+/// `String hyxProbeIp(String ip, int port)` — 对指定 IP 单播探测对端是否在线（跨子网发现）。
+/// 在线返回 `"name\tip:port\tdevice_id"`，离线/失败返回空串。Kotlin 侧由蓝牙层在
+/// 读到邻居的候选 IP 后调用，以决定其在线状态。
+#[no_mangle]
+pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxProbeIp<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+    ip: jni::objects::JString<'local>,
+    port: jint,
+) -> jobject {
+    let ip_str = env
+        .get_string(&ip)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let result =
+        runtime().block_on(probe_ip(&ip_str, if port > 0 { port as u16 } else { 14567 }));
     new_jstring(&mut env, &result)
 }
 
