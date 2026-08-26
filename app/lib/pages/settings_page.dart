@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hyx_isolates/rust/api/device.dart' as rust_device;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,7 +37,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
-    _loadName();
+    unawaited(_loadName());
   }
 
   @override
@@ -65,7 +67,7 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       final name = _controller.text.trim();
       // 同步到 Rust 侧（fire-and-forget，setDeviceName 是同步函数）。
-      rust_device.setDeviceName(name: name);
+      unawaited(rust_device.setDeviceName(name: name));
       // 持久化。
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kCustomNamePrefKey, name);

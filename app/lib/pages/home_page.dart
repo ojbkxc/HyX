@@ -68,7 +68,7 @@ class _HomePageState extends State<HomePage> with Refena {
       final prefs = await SharedPreferences.getInstance();
       final customName = prefs.getString('hyx_custom_device_name');
       if (customName != null && customName.isNotEmpty) {
-        rust_device.setDeviceName(name: customName);
+        unawaited(rust_device.setDeviceName(name: customName));
       }
       // 加载本设备身份（fire-and-forget）。
       unawaited(ref.redux(deviceProvider).dispatchAsync(LoadMyDeviceAction()));
