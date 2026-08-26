@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
@@ -26,7 +25,8 @@ void attachRefena(RefenaContainer container) => _refena = container;
 /// 候选 IP 能否互通、是否在线，仍由 Rust 层单播探测（[probe_peer]）决定，
 /// 每次发现刷新都会重探测——蓝牙不改变"在线/离线"语义。
 ///
-/// 只在移动端（Android / iOS）启用；桌面端为空实现。
+/// 所有终端（Android / iOS / Windows / macOS / Linux）均尝试启用；不支持的
+/// 平台（如桌面端缺少蓝牙插件或适配器、Web）内部自行跳过，不影响主流程。
 class BleSharing {
   static final BleSharing instance = BleSharing._();
 
@@ -44,9 +44,11 @@ class BleSharing {
 
   BleSharing._();
 
-  /// 当前平台是否支持 BLE（仅移动端）。
-  bool get supported =>
-      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  /// 是否尝试启用 BLE：所有非 Web 终端均允许。
+  ///
+  /// 桌面端若底层插件未注册或缺少蓝牙适配器，`advertise`/`scan` 内部已用
+  /// try/catch 兜底，静默跳过，不会影响主流程。
+  bool get supported => !kIsWeb;
 
   /// 优雅启动：广告本机 IP + 开始扫描邻居。桌面端直接返回。
   Future<void> start() async {
