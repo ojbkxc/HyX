@@ -163,6 +163,7 @@ class _HomePageState extends State<HomePage> with Refena {
   /// 刷新 UI。空串视为重置为默认名（Rust 侧逻辑）。
   Future<void> _showDeviceNameDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
+    if (!context.mounted) return;
     final current = prefs.getString('hyx_custom_device_name') ?? '';
 
     final controller = TextEditingController(text: current);
