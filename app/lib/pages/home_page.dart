@@ -8,16 +8,19 @@ import 'package:hyx_app/gen/strings.g.dart';
 import 'package:hyx_app/pages/history_drawer.dart';
 import 'package:hyx_app/pages/log_sheet.dart';
 
+import 'package:hyx_app/pages/settings_page.dart';
 import 'package:hyx_app/pages/transfer_progress_sheet.dart';
 import 'package:hyx_app/provider/device_provider.dart';
 import 'package:hyx_app/provider/log_provider.dart';
 import 'package:hyx_app/provider/transfer_provider.dart';
 import 'package:hyx_app/util/update_checker.dart';
 import 'package:hyx_app/widget/device_card.dart';
+import 'package:hyx_isolates/rust/api/device.dart' as rust_device;
 import 'package:hyx_isolates/rust/api/model.dart' as model;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:share_handler/share_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 与 MainActivity.kt 通信的 MethodChannel，用于通知 Dart 侧已就绪、
 /// 可重放启动期间被暂存的分享 intent。
@@ -59,6 +62,14 @@ class _HomePageState extends State<HomePage> with Refena {
     ensureRef((ref) async {
       // 注册日志回调。
       await ref.redux(logProvider).dispatchAsync(InstallLogCallbackAction());
+      // 读取持久化的自定义设备名称并同步到 Rust 侧。
+      // 必须在 LoadMyDeviceAction 之前完成，这样 createDevice() 拿到的
+      // 就是用户自定义的名称，beacon 广播也会携带新名称。
+      final prefs = await SharedPreferences.getInstance();
+      final customName = prefs.getString('hyx_custom_device_name');
+      if (customName != null && customName.isNotEmpty) {
+        rust_device.setDeviceName(name: customName);
+      }
       // 加载本设备身份（fire-and-forget）。
       unawaited(ref.redux(deviceProvider).dispatchAsync(LoadMyDeviceAction()));
       // 加载持久化的已知设备列表（含历史设备 + 接收/禁止状态）。
@@ -132,6 +143,15 @@ class _HomePageState extends State<HomePage> with Refena {
             icon: const Icon(Icons.article),
             tooltip: t.log.title,
             onPressed: () => showLogSheet(context),
+          ),
+          // 设置：自定义设备名称等。
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: '设置',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsPage()),
+            ),
           ),
         ],
       ),
