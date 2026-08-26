@@ -185,10 +185,14 @@ impl DiscoveryService {
     }
 
     fn create_beacon(&self) -> DiscoveryBeacon {
+        // 优先用全局自定义名称（运行时可通过 `core::set_device_name` 更新），
+        // 这样常驻的 DiscoveryManager（如 hyxStartListener 创建的）在用户改了
+        // 自定义名称后也能即时广播新名称，无需重启。fallback 到构造时的名称。
+        let device_name = crate::try_custom_device_name().unwrap_or_else(|| self.device_name.clone());
         DiscoveryBeacon {
             version: PROTOCOL_VERSION,
             device_id: self.device_id,
-            device_name: self.device_name.clone(),
+            device_name,
             port: self.transfer_port,
             cert_fingerprint: self.cert_fingerprint,
         }

@@ -543,6 +543,8 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxSetDeviceName(
         .map(|c| c.to_string_lossy().into_owned())
         .unwrap_or_default();
     let trimmed = s.trim().to_string();
+    // 同步到 core 全局名称，让常驻 DiscoveryManager 的 beacon 也即时更新。
+    hyx_core::set_device_name(&trimmed);
     let mut guard = CUSTOM_NAME.lock().expect("CUSTOM_NAME lock");
     *guard = if trimmed.is_empty() { None } else { Some(trimmed) };
 }

@@ -35,6 +35,8 @@ static CUSTOM_NAME: Mutex<Option<String>> = Mutex::new(None);
 #[frb]
 pub fn set_device_name(name: String) {
     let trimmed = name.trim().to_string();
+    // 同步到 core 全局名称，让常驻 DiscoveryManager 的 beacon 也即时更新。
+    hyx_core::set_device_name(&trimmed);
     let mut guard = CUSTOM_NAME.lock().expect("CUSTOM_NAME lock");
     *guard = if trimmed.is_empty() { None } else { Some(trimmed) };
 }
