@@ -5,7 +5,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hyx_app/gen/strings.g.dart';
-import 'package:hyx_app/pages/settings_page.dart';
 import 'package:hyx_app/pages/transfer_progress_sheet.dart';
 import 'package:hyx_app/provider/device_provider.dart';
 import 'package:hyx_app/provider/log_provider.dart';
@@ -120,33 +119,117 @@ class _HomePageState extends State<HomePage> with Refena {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            Text(t.appName, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 8),
-            if (devState.scanning)
-              const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
+        // 标题显示本设备名称（自定义名或默认 hyx-{id前6位}），点击弹出 inline 编辑对话框。
+        // myDevice.name 来自 Rust 侧 effective_device_name()，已是自定义名或默认名。
+        title: GestureDetector(
+          onTap: () => _showDeviceNameDialog(context),
+          behavior: HitTestBehavior.opaque,
+          child: Row(
+            children: [
+              Text(
+                // myDevice.name 来自 Rust 侧 effective_device_name()，
+                // 自定义名非空时为自定义名，否则为默认 hyx-{id前6位}。
+                // myDevice 尚未加载时 fallback 到 app 名 "HyX"。
+                devState.myDevice?.name ?? t.appName,
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-          ],
-        ),
-        actions: [
-          // 设置：自定义设备名称等。
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: '设置',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SettingsPage()),
-            ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.edit_outlined,
+                size: 16,
+                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+              ),
+              const SizedBox(width: 8),
+              if (devState.scanning)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
       body: _buildBody(context, devState),
 
     );
+  }
+
+  /// 弹出 inline 设备名称编辑对话框。
+  ///
+  /// 替代原 SettingsPage：用户在 AppBar 标题上点击即可改名。
+  /// 保存时同步到 Rust 侧（[rust_device.setDeviceName]）+ 持久化到
+  /// SharedPreferences('hyx_custom_device_name') + dispatch [ReloadMyDeviceAction]
+  /// 刷新 UI。空串视为重置为默认名（Rust 侧逻辑）。
+  Future<void> _showDeviceNameDialog(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    final current = prefs.getString('hyx_custom_device_name') ?? '';
+
+    final controller = TextEditingController(text: current);
+    var saving = false;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setState) {
+            return AlertDialog(
+              title: const Text('设备名称'),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: '输入自定义设备名称',
+                  prefixIcon: Icon(Icons.badge_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                textInputAction: TextInputAction.done,
+                maxLength: 32,
+                onSubmitted: (_) => Navigator.pop(ctx, true),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(t.history.cancel),
+                ),
+                FilledButton(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          setState(() => saving = true);
+                          try {
+                            final name = controller.text.trim();
+                            // 同步到 Rust 侧（fire-and-forget，setDeviceName 是同步函数）。
+                            unawaited(rust_device.setDeviceName(name: name));
+                            // 持久化。
+                            await prefs.setString('hyx_custom_device_name', name);
+                            if (!ctx.mounted) return;
+                            // 刷新 UI：强制重新加载 myDevice 拿最新名称。
+                            unawaited(context.redux(deviceProvider).dispatchAsync(ReloadMyDeviceAction()));
+                            Navigator.pop(ctx, true);
+                          } finally {
+                            if (ctx.mounted) setState(() => saving = false);
+                          }
+                        },
+                  child: Text(saving ? '保存中…' : '保存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    controller.dispose();
+    // 保存成功后给一个轻提示。
+    if (result == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('设备名称已更新'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
   }
 
   /// 主内容：分区显示在线设备 + 历史设备。

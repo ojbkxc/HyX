@@ -27,17 +27,18 @@ import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DevicesOther
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Radar
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Switch
@@ -58,10 +59,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.documentfile.provider.DocumentFile
 import com.ojbkxc.hyx.R
 import com.ojbkxc.hyx.core.HyXCoreController
@@ -73,18 +78,23 @@ import java.io.File
 /**
  * 设备页 —— 对齐 Flutter home_page.dart + device_card.dart。
  *
- * 顶部：标题 "HyX" + 扫描指示 + 刷新 + 日志按钮。
+ * 顶部：本设备名称（可点击改名）+ 扫描指示 + 日志按钮。
  * 主体：在线设备区 + 历史设备区，卡片为 Column 布局（头像/名称/地址/状态徽章 + 接收开关）。
  * 在线设备点击整卡触发文件选择 → 发送；历史设备置灰，左/右滑删除。
+ *
+ * LAN 发现由 [HyXCoreController.startAutoDiscovery] 每 5s 自动刷新，
+ * 无手动刷新按钮（对齐 Flutter StartDiscoveryAction 的 5s 定时）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DevicesScreen(controller: HyXCoreController, onNavigateToSettings: () -> Unit = {}) {
+fun DevicesScreen(controller: HyXCoreController) {
     val devices by controller.devices.collectAsState()
     val scanning by controller.devicesScanning.collectAsState()
     val autoListening by controller.autoListening.collectAsState()
     val wifiDirectEnabled by controller.wifiDirectEnabled.collectAsState()
+    val deviceName by controller.deviceName.collectAsState()
     var showLogSheet by remember { mutableStateOf(false) }
+    var showNameDialog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Device?>(null) }
 
     val online = devices.filter { it.online }
@@ -109,17 +119,37 @@ fun DevicesScreen(controller: HyXCoreController, onNavigateToSettings: () -> Uni
     }
 
     Column(Modifier.fillMaxSize()) {
-        // AppBar 区域：标题 + 扫描指示 + 刷新 + 日志。
+        // AppBar 区域：本设备名称（可点击改名）+ 扫描指示 + 日志按钮。
+        // 去掉了刷新按钮（改为 controller.startAutoDiscovery 每 5s 自动刷新）
+        // 和设置按钮（改名直接点标题）。
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                stringResource(R.string.app_name),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            // 标题：本设备名称，点击弹出 inline 编辑对话框。
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showNameDialog = true }
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    deviceName.ifEmpty { stringResource(R.string.app_name) },
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.size(6.dp))
+                Icon(
+                    Icons.Outlined.Edit,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
             Spacer(Modifier.size(8.dp))
             if (scanning) {
                 CircularProgressIndicator(
@@ -128,24 +158,10 @@ fun DevicesScreen(controller: HyXCoreController, onNavigateToSettings: () -> Uni
                 )
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = { controller.startDiscovery() }) {
-                Icon(
-                    Icons.Outlined.Refresh,
-                    contentDescription = stringResource(R.string.refresh),
-                    tint = MaterialTheme.colorScheme.onBackground
-                )
-            }
             IconButton(onClick = { showLogSheet = true }) {
                 Icon(
                     Icons.Outlined.Article,
                     contentDescription = stringResource(R.string.log_title),
-                    tint = MaterialTheme.colorScheme.onBackground
-                )
-            }
-            IconButton(onClick = onNavigateToSettings) {
-                Icon(
-                    Icons.Outlined.Settings,
-                    contentDescription = "设置",
                     tint = MaterialTheme.colorScheme.onBackground
                 )
             }
@@ -306,6 +322,65 @@ fun DevicesScreen(controller: HyXCoreController, onNavigateToSettings: () -> Uni
             onDismiss = { showLogSheet = false }
         )
     }
+
+    // 设备名称编辑对话框：点击 AppBar 标题弹出，替代原 SettingsScreen。
+    // 保存调 controller.setCustomName，controller 内部会同步到 Rust 侧 +
+    // 持久化 + 刷新 deviceName StateFlow，UI 标题即时更新。
+    if (showNameDialog) {
+        DeviceNameDialog(
+            currentName = controller.getCustomName(),
+            onDismiss = { showNameDialog = false },
+            onSave = { name ->
+                controller.setCustomName(name)
+                showNameDialog = false
+            }
+        )
+    }
+}
+
+/**
+ * 设备名称 inline 编辑对话框。对齐 Flutter home_page.dart 的 _showDeviceNameDialog。
+ *
+ * 预填当前自定义名（空串表示用默认名），保存时调 [onSave]；
+ * 空串视为重置为默认名 `hyx-{id前6位}`（Rust 侧逻辑）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DeviceNameDialog(
+    currentName: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var name by remember { mutableStateOf(currentName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设备名称") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("输入自定义设备名称") },
+                leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { onSave(name) })
+            )
+        },
+        confirmButton = {
+            FilledButton(onClick = { onSave(name) }) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.history_cancel))
+            }
+        }
+    )
 }
 
 /** 分区标题：标题 + 数量徽章。对齐 Flutter _SectionHeader。 */

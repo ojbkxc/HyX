@@ -117,6 +117,13 @@ object HyXNative {
     external fun hyxSetDeviceName(name: String)
 
     /**
+     * 返回当前生效的设备名称（自定义优先，否则默认 `hyx-{id前6位}`）。
+     * 供 UI 在 AppBar 标题处展示本设备名称。对应 Flutter 侧
+     * `rust_device.createDevice().name`。
+     */
+    external fun hyxGetDeviceName(): String?
+
+    /**
      * Register a global Rust log callback. Must be called after [ensureLoaded]
      * (i.e. once `libhyx_mobile.so` is loaded) and before any other native call
      * that might emit a `tracing` event. Installs a process-global

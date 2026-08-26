@@ -47,6 +47,16 @@ class HyXCoreController : ViewModel() {
     private val _devicesScanning = MutableStateFlow(false)
     val devicesScanning: StateFlow<Boolean> = _devicesScanning.asStateFlow()
 
+    // 本设备当前生效名称（自定义优先，否则默认 hyx-{id前6位}）。
+    // init 时从 Rust 侧拉取一次，setCustomName 时同步更新。供 UI AppBar 标题展示。
+    private val _deviceName = MutableStateFlow("HyX")
+    val deviceName: StateFlow<String> = _deviceName.asStateFlow()
+
+    // 自动定时刷新 LAN 发现的协程（每 5s 一次，对齐 Flutter StartDiscoveryAction）。
+    // onCleared 时取消。与 init 里的首次 startDiscovery 互补：首次立即扫一次，
+    // 此后定时循环每 5s 扫一次；若上一次扫描未完成则跳过本次（_devicesScanning 守卫）。
+    private var discoveryJob: Job? = null
+
 
     private val _progress = MutableStateFlow<TransferProgress?>(null)
     val progress: StateFlow<TransferProgress?> = _progress.asStateFlow()
@@ -113,13 +123,50 @@ class HyXCoreController : ViewModel() {
             // 同步持久化的自定义设备名称到 Rust 侧（必须在 discover/listen 之前，
             // 这样 beacon 携带的 device_name 才是用户自定义名）。
             loadCustomName()
+            // 拉取本设备当前生效名称供 UI AppBar 标题展示。
+            refreshDeviceName()
             startDiscovery()
+            // 自动定时刷新 LAN 发现（每 5s 一次，对齐 Flutter StartDiscoveryAction 的 5s 定时）。
+            // 去掉 UI 手动刷新按钮后由这个协程负责持续刷新。
+            startAutoDiscovery()
             // 自动监听接收：应用启动即监听 14567 端口，对齐 Flutter app 的 StartAutoListenAction。
             // 传输完成后自动重启监听（持续接收），无需用户手动切接收模式 + 点开始接收。
             startAutoListen()
             startBleDiscovery()
         } catch (t: Throwable) {
             android.util.Log.e("HyXCoreController", "init block failed", t)
+        }
+    }
+
+    /**
+     * 从 Rust 侧拉取本设备当前生效名称并更新 [_deviceName]。
+     * 在 init 和 [setCustomName] 后调用，确保 UI 标题即时刷新。
+     */
+    private fun refreshDeviceName() {
+        try {
+            if (HyXNative.isLoaded) {
+                val name = HyXNative.hyxGetDeviceName()
+                if (!name.isNullOrBlank()) _deviceName.value = name
+            }
+        } catch (t: Throwable) {
+            android.util.Log.e("HyXCoreController", "refreshDeviceName failed", t)
+        }
+    }
+
+    /**
+     * 启动自动定时 LAN 发现（每 5s 一次，对齐 Flutter StartDiscoveryAction）。
+     * 若上一次扫描未完成（[_devicesScanning] 为 true）则跳过本次，避免并发。
+     * [onCleared] 时取消协程。
+     */
+    private fun startAutoDiscovery() {
+        if (discoveryJob?.isActive == true) return
+        discoveryJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(5000)
+                if (!_devicesScanning.value) {
+                    startDiscovery()
+                }
+            }
         }
     }
 
@@ -271,6 +318,8 @@ class HyXCoreController : ViewModel() {
                 }
                 val prefs = HyXNative.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 prefs?.edit()?.putString(PREF_CUSTOM_NAME, trimmed)?.apply()
+                // 刷新 UI 标题：从 Rust 侧拉取最新生效名称（自定义名或默认名）。
+                refreshDeviceName()
             } catch (t: Throwable) {
                 android.util.Log.e("HyXCoreController", "setCustomName failed", t)
             }
@@ -800,6 +849,8 @@ class HyXCoreController : ViewModel() {
 
     override fun onCleared() {
         android.util.Log.d("R", "onCleared")
+        discoveryJob?.cancel()
+        discoveryJob = null
         bleProbeJob?.cancel()
         bleProbeJob = null
         try { bleManager.stop() } catch (t: Throwable) { android.util.Log.w("HyXCoreController", "ble stop failed", t) }

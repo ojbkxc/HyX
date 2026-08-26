@@ -47,6 +47,17 @@ internal class WifiDirectManager(
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // Bug1: Wi-Fi Direct 的 discoverPeers 是一次性的，发现结果约 30s 后过期。
+    // 用定时 Runnable 周期性重新发现，保持对端可持续被发现。
+    private val discoverIntervalMs = 30_000L
+    private val discoverRunnable = object : Runnable {
+        override fun run() {
+            if (!started) return
+            discoverPeers()
+            mainHandler.postDelayed(this, discoverIntervalMs)
+        }
+    }
+
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             try {
@@ -103,6 +114,8 @@ internal class WifiDirectManager(
                 }
                 registered = true
                 discoverPeers()
+                // Bug1: 启动周期性重新发现，避免 30s 后发现结果过期。
+                mainHandler.postDelayed(discoverRunnable, discoverIntervalMs)
             } catch (t: Throwable) {
                 android.util.Log.w("WifiDirect", "start failed: ${t.message}")
             }
@@ -116,6 +129,19 @@ internal class WifiDirectManager(
         isGroupOwner = false
         acting = false
         actedMacs.clear()
+        // Bug1: 取消周期性发现任务。
+        mainHandler.removeCallbacks(discoverRunnable)
+        // Bug3: 清理可能残留的 P2P 组，避免下次启动时残留组干扰发现。
+        // 没有活跃组时 removeGroup 会失败，try/catch 静默忽略。
+        try {
+            val m = manager
+            val c = channel
+            if (m != null && c != null) {
+                m.removeGroup(c, SimpleListener("removeGroup"))
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("WifiDirect", "removeGroup failed: ${t.message}")
+        }
         contextRef?.let { ctx ->
             try {
                 if (registered) ctx.unregisterReceiver(receiver)
@@ -144,10 +170,14 @@ internal class WifiDirectManager(
             m.requestPeers(c) { peers ->
                 val deviceList = peers.deviceList
                 if (deviceList.isEmpty()) return@requestPeers
-                val peer = deviceList.firstOrNull { it.status == WifiP2pDevice.AVAILABLE }
-                    ?: deviceList.first()
-                if (peer.deviceAddress.isNullOrBlank()) return@requestPeers
-                ensureRole(peer.deviceAddress)
+                // Bug2: 遍历所有 AVAILABLE 状态的 peer，对每个都尝试建组。
+                // ensureRole 已有 actedMacs 去重和 acting 守卫，不会重复建组。
+                deviceList
+                    .filter {
+                        it.status == WifiP2pDevice.AVAILABLE &&
+                            !it.deviceAddress.isNullOrBlank()
+                    }
+                    .forEach { ensureRole(it.deviceAddress) }
             }
         } catch (t: Throwable) {
             android.util.Log.w("WifiDirect", "requestPeers failed: ${t.message}")
@@ -162,21 +192,38 @@ internal class WifiDirectManager(
     private fun ensureRole(peerMac: String) {
         if (acting) return
         if (!actedMacs.add(peerMac)) return
-        val own = ourMac ?: return // THIS_DEVICE 尚未到来，等下次事件再判定
+        // Bug5: ourMac 为 null 时（某些设备不发送 THIS_DEVICE_CHANGED）不直接 return，
+        // 否则 actedMacs 已 add 但永远无法判定，导致永远无法建组。
+        // 改为：ourMac 为 null 时直接 connect，让对端（可能有 ourMac）来决定角色。
+        val own = ourMac
         mainHandler.post {
             try {
                 val m = manager ?: return@post
                 val c = channel ?: return@post
                 acting = true
-                if (own.compareTo(peerMac) < 0) {
+                if (own == null) {
+                    // Bug5: 本机 MAC 未知，主动 connect 入组，由对端决定角色。
+                    m.connect(
+                        c,
+                        WifiP2pConfig().apply {
+                            deviceAddress = peerMac
+                            wps.setup = android.net.wifi.WpsInfo.PBC
+                        },
+                        RoleActionListener(peerMac, "connect")
+                    )
+                } else if (own.compareTo(peerMac) < 0) {
                     // 本机当 Group Owner（软热点），等待对端 connect 入组。
-                    m.createGroup(c, SimpleListener("createGroup"))
+                    m.createGroup(c, RoleActionListener(peerMac, "createGroup"))
                 } else {
                     // 主动连接对端（入组）。
-                    m.connect(c, WifiP2pConfig().apply {
-                        deviceAddress = peerMac
-                        wps.setup = android.net.wifi.WpsInfo.PBC
-                    }, SimpleListener("connect"))
+                    m.connect(
+                        c,
+                        WifiP2pConfig().apply {
+                            deviceAddress = peerMac
+                            wps.setup = android.net.wifi.WpsInfo.PBC
+                        },
+                        RoleActionListener(peerMac, "connect")
+                    )
                 }
             } catch (t: Throwable) {
                 acting = false
@@ -188,7 +235,17 @@ internal class WifiDirectManager(
 
     /** P2P 组建立成功（CONNECTION_CHANGED 且 groupFormed）后解析对端 IP。 */
     private fun handleConnection(info: WifiP2pInfo?) {
-        if (info?.groupFormed != true) return
+        if (info?.groupFormed != true) {
+            // Bug6: 连接断开（info 为 null 或 groupFormed=false）时重置状态，
+            // 否则 acting/isGroupOwner 残留会导致无法重新建组。
+            isGroupOwner = false
+            acting = false
+            // 清理已处理 MAC 集合，允许重新对已断开的 peer 建组。
+            actedMacs.clear()
+            // 重新启动发现，开始新一轮建组尝试。
+            if (started) discoverPeers()
+            return
+        }
         isGroupOwner = info.isGroupOwner
         val peerIp: String? = if (isGroupOwner) {
             resolveClientIpViaArp()
@@ -237,6 +294,26 @@ internal class WifiDirectManager(
         override fun onSuccess() = Unit
         override fun onFailure(reason: Int) {
             android.util.Log.w("WifiDirect", "$tag failed: reason=$reason")
+        }
+    }
+
+    /**
+     * Bug4: 角色判定专用 Listener。createGroup/connect 失败时必须重置 acting 并移除
+     * 对应 peerMac，否则 acting 残留会导致后续永远无法再建组。
+     * SimpleListener 是通用的，不知道是哪个 peer，故此处单独建一个。
+     */
+    private inner class RoleActionListener(
+        private val peerMac: String,
+        private val tag: String
+    ) : WifiP2pManager.ActionListener {
+        override fun onSuccess() = Unit
+        override fun onFailure(reason: Int) {
+            acting = false
+            actedMacs.remove(peerMac)
+            android.util.Log.w(
+                "WifiDirect",
+                "$tag failed: reason=$reason, peerMac=$peerMac"
+            )
         }
     }
 }

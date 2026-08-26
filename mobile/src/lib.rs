@@ -549,6 +549,20 @@ pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxSetDeviceName(
     *guard = if trimmed.is_empty() { None } else { Some(trimmed) };
 }
 
+/// `String hyxGetDeviceName()` — 返回当前生效的设备名称。
+///
+/// 自定义名优先，否则默认 `hyx-{id前6位}`。供 Android UI 在 AppBar 标题处
+/// 展示本设备名称（对应 Flutter 侧 `rust_device.createDevice().name`）。
+/// 对应 FRB 侧 `device::effective_device_name`。
+#[no_mangle]
+pub extern "system" fn Java_com_ojbkxc_hyx_core_HyXNative_hyxGetDeviceName<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+) -> jobject {
+    let name = effective_device_name();
+    new_jstring(&mut env, &name)
+}
+
 /// `String hyxStartListener(int port, int chunkBytes, long fsyncEveryBytes,
 /// int compression, int aggregation, String saveDir, ProgressCallback cb)` —
 /// bind + accept + receive into `saveDir`. While listening, also broadcasts

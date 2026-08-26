@@ -276,6 +276,9 @@ class LoadKnownDevicesAction extends AsyncReduxAction<DeviceService, DeviceState
 }
 
 /// 加载本设备身份。对应 Rust `create_device`。
+///
+/// 受 `myDevice != null` 守卫限制：仅在首次加载时真正调用 Rust 侧，
+/// 后续重复 dispatch 直接返回当前状态（避免每次刷新都重建身份对象）。
 class LoadMyDeviceAction extends AsyncReduxAction<DeviceService, DeviceState> {
   @override
   Future<DeviceState> reduce() async {
@@ -285,6 +288,24 @@ class LoadMyDeviceAction extends AsyncReduxAction<DeviceService, DeviceState> {
       return state.copyWith(myDevice: dev);
     } catch (e) {
       _logger.warning('createDevice failed: $e');
+      return state;
+    }
+  }
+}
+
+/// 强制重新加载本设备身份（用户改了自定义名称后刷新 UI）。
+///
+/// 与 [LoadMyDeviceAction] 的区别：不受 `myDevice != null` 守卫限制，
+/// 总是重新调用 `rust_device.createDevice()` 拿最新名称。用户在 AppBar
+/// inline 编辑对话框保存名称后 dispatch 此 action，UI 即时刷新为新名称。
+class ReloadMyDeviceAction extends AsyncReduxAction<DeviceService, DeviceState> {
+  @override
+  Future<DeviceState> reduce() async {
+    try {
+      final dev = await rust_device.createDevice();
+      return state.copyWith(myDevice: dev);
+    } catch (e) {
+      _logger.warning('reload myDevice failed: $e');
       return state;
     }
   }
