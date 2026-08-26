@@ -472,7 +472,8 @@ class AddBluetoothCandidatesAction extends ReduxAction<DeviceService, DeviceStat
   DeviceState reduce() {
     if (ips.isEmpty) return state;
     final next = Set<String>.from(state.bluetoothCandidates)..addAll(ips);
-    dispatch(RefreshPeersAction());
+    // 立即触发一次探测，让新候选尽快进入在线判定（RefreshPeersAction 是异步 action）。
+    unawaited(dispatchAsync(RefreshPeersAction()));
     return state.copyWith(bluetoothCandidates: next);
   }
 }
