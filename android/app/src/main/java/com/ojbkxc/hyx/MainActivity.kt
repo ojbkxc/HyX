@@ -64,6 +64,35 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        // 应用可能由系统分享面板启动，解析分享 Intent 并交给 controller 处理。
+        handleShareIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    /**
+     * 解析系统分享 Intent（ACTION_SEND / ACTION_SEND_MULTIPLE），提取文件 URI 列表
+     * 并交给 [HyXCoreController.handleSharedUris] 复制到缓存后发送给首个在线设备。
+     */
+    @Suppress("DEPRECATION")
+    private fun handleShareIntent(intent: Intent) {
+        if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) return
+        val uris = when (intent.action) {
+            Intent.ACTION_SEND -> {
+                val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM) ?: return
+                listOf(uri)
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM) ?: return
+            }
+            else -> return
+        }
+        if (uris.isEmpty()) return
+        controller.handleSharedUris(uris)
     }
 
     /** 用系统浏览器打开下载链接。 */

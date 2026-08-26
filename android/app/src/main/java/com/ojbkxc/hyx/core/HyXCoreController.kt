@@ -3,9 +3,11 @@ package com.ojbkxc.hyx.core
 import android.content.ContentValues
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ojbkxc.hyx.ui.components.mimeTypeOf
@@ -168,6 +170,52 @@ class HyXCoreController : ViewModel() {
         if (updated == _devices.value) return
         _devices.value = updated
         persistDevices(updated)
+    }
+
+    /**
+     * 处理系统分享面板传入的文件 URI 列表：复制到 app 缓存后发送给首个在线设备。
+     * 对齐 Flutter app 的分享入口。当前 [startLanSend] 仅支持单文件，多文件时发送首个，
+     * 其余记录警告（后续可扩展为队列依次发送）。
+     */
+    fun handleSharedUris(uris: List<Uri>) {
+        android.util.Log.d("R", "handleSharedUris uris=${uris.size}")
+        val ctx = HyXNative.appContext ?: return
+        val onlineDevices = _devices.value.filter { it.online }
+        if (onlineDevices.isEmpty()) {
+            android.util.Log.w("HyXCoreController", "handleSharedUris: no online device")
+            return
+        }
+        val target = onlineDevices.first()
+        viewModelScope.launch(Dispatchers.IO) {
+            val paths = uris.mapNotNull { copyToCache(ctx, it) }
+            if (paths.isEmpty()) return@launch
+            if (paths.size > 1) {
+                android.util.Log.w(
+                    "HyXCoreController",
+                    "handleSharedUris: ${paths.size} files, sending first only"
+                )
+            }
+            val addr = target.address ?: run {
+                android.util.Log.w("HyXCoreController", "handleSharedUris: target has no address")
+                return@launch
+            }
+            startLanSend(addr, paths.first(), target.fingerprint)
+        }
+    }
+
+    /**
+     * 将 content URI 复制到 app cache，使 Rust 内核能按路径读取。
+     * 与 DevicesScreen 的 copyToCache 逻辑一致。
+     */
+    private fun copyToCache(context: Context, uri: Uri): String? = try {
+        val name = DocumentFile.fromSingleUri(context, uri)?.name ?: "share.bin"
+        val destDir = File(context.cacheDir, "hyx_send").apply { mkdirs() }
+        val dest = File(destDir, name)
+        val input = context.contentResolver.openInputStream(uri) ?: return null
+        input.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+        dest.absolutePath
+    } catch (e: Exception) {
+        null
     }
 
     companion object {

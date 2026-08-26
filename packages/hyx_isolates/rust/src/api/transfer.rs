@@ -292,76 +292,25 @@ async fn receive_into(
     }
 
     let out = PathBuf::from(dir);
-    // 接收方重连配置：与 send_path 对齐（默认 5 次，指数退避）。
-    // 接收方重连 = 重新 accept 等待对端重连过来，与发送方重连（重新 connect）不同。
-    let reconnect_config = ReconnectConfig::default();
-    let mut attempt = 0u32;
+    let mut prog = ProgressState::new(0);
+    prog.set_progress_callback(progress_sink(
+        sink.clone(),
+        RsTransferDirection::Receive,
+        None,
+        None,
+    ));
+    // 单次接收：不再在此处做重连/重新 accept。外层 start_listener 的 loop 负责
+    // 持续 accept 新连接，并发发送方的连接不会因首轮接收结束而被丢弃。
+    let summary = session
+        .receive_to(&out, None, |_| AcceptDecision::Accept, Some(&mut prog))
+        .await?;
 
-    loop {
-        let mut prog = ProgressState::new(0);
-        prog.set_progress_callback(progress_sink(
-            sink.clone(),
-            RsTransferDirection::Receive,
-            None,
-            None,
-        ));
-        let result = session
-            .receive_to(&out, None, |_| AcceptDecision::Accept, Some(&mut prog))
-            .await;
-
-        match result {
-            Ok(summary) => {
-                // 接收完成后，把从 TransferInfo 解析出的顶层文件名回填给 Dart 侧，
-                // 让历史记录能拿到真实文件名（而非空串）。root_name 为空时不 emit，避免无意义事件。
-                if !summary.root_name.is_empty() {
-                    emit_file_name(sink, summary.root_name, RsTransferDirection::Receive);
-                }
-                return Ok(());
-            }
-            Err(e) => {
-                // 不可恢复错误：直接 Failed（原行为）。
-                if !e.is_recoverable() {
-                    tracing::warn!("Non-recoverable receive error, not retrying: {}", e);
-                    return Err(e.into());
-                }
-
-                // 可恢复错误但已达上限：返回错误，由外层 emit_final(Failed) 处理。
-                if !reconnect_config.should_retry(attempt) {
-                    tracing::warn!(
-                        "Max receive reconnection attempts ({}) reached: {}",
-                        reconnect_config.max_attempts,
-                        e
-                    );
-                    return Err(anyhow::anyhow!(
-                        "Receive failed after {} attempts: {}",
-                        attempt + 1,
-                        e
-                    ));
-                }
-
-                let delay = reconnect_config.backoff_delay(attempt);
-                tracing::warn!(
-                    "Recoverable receive error (attempt {}): {}. Retrying in {:?}...",
-                    attempt + 1,
-                    e,
-                    delay
-                );
-
-                tokio::time::sleep(delay).await;
-
-                // 接收方重连：重新 accept 等待对端建立新连接。
-                // reaccept 仅对 responder session 可用（LAN listen / rendezvous pair_receive 都是 responder）。
-                if let Err(reconnect_err) = session.reaccept().await {
-                    tracing::warn!("Failed to reaccept: {}", reconnect_err);
-                    return Err(reconnect_err.into());
-                }
-
-                // 重连后重新 emit peer_address，让 Dart 侧历史记录拿到新连接的对端地址。
-                emit_peer_address(sink, session.peer_addr().to_string());
-                attempt += 1;
-            }
-        }
+    // 接收完成后，把从 TransferInfo 解析出的顶层文件名回填给 Dart 侧，
+    // 让历史记录能拿到真实文件名（而非空串）。root_name 为空时不 emit，避免无意义事件。
+    if !summary.root_name.is_empty() {
+        emit_file_name(sink, summary.root_name, RsTransferDirection::Receive);
     }
+    Ok(())
 }
 
 /// 发送 `path` 到对端，带断点续传状态文件。对应 mobile `send_path`。
@@ -477,47 +426,50 @@ pub fn start_listener(
             }
         }
 
-        let mut session = match P2PSession::accept(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port_u16),
-            identity(),
-            current_device_id(),
-        )
-        .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!("accept failed on port {port_u16}: {e}");
-                if let Some(d) = discovery.as_ref() {
-                    d.stop();
+        // 持续 accept 循环：endpoint 保持存活，避免并发发送方的连接在 accept
+        // 队列里因首轮接收结束就被丢弃。每收完一个文件继续 accept 下一个，直到
+        // accept 失败或任务被 cancel。discovery 保持运行，为后续 accept 继续广播信标。
+        loop {
+            let mut session = match P2PSession::accept(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port_u16),
+                identity(),
+                current_device_id(),
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("accept failed on port {port_u16}: {e}");
+                    if let Some(d) = discovery.as_ref() {
+                        d.stop();
+                    }
+                    emit_final(
+                        &sink_clone,
+                        RsTransferStatus::Failed,
+                        Some(e.to_string()),
+                        RsTransferDirection::Receive,
+                    );
+                    return;
                 }
-                emit_final(
+            };
+            // accept 成功 → 把对端地址回填给 Dart 侧，让历史记录能拿到真实 peer_address。
+            emit_peer_address(&sink_clone, session.peer_addr().to_string());
+            let res = receive_into(&mut session, &dir, &sink_clone).await;
+            match res {
+                Ok(()) => emit_final(
+                    &sink_clone,
+                    RsTransferStatus::Completed,
+                    None,
+                    RsTransferDirection::Receive,
+                ),
+                Err(e) => emit_final(
                     &sink_clone,
                     RsTransferStatus::Failed,
                     Some(e.to_string()),
                     RsTransferDirection::Receive,
-                );
-                return;
+                ),
             }
-        };
-        // accept 成功 → 把对端地址回填给 Dart 侧，让历史记录能拿到真实 peer_address。
-        emit_peer_address(&sink_clone, session.peer_addr().to_string());
-        let res = receive_into(&mut session, &dir, &sink_clone).await;
-        if let Some(d) = discovery.as_ref() {
-            d.stop();
-        }
-        match res {
-            Ok(()) => emit_final(
-                &sink_clone,
-                RsTransferStatus::Completed,
-                None,
-                RsTransferDirection::Receive,
-            ),
-            Err(e) => emit_final(
-                &sink_clone,
-                RsTransferStatus::Failed,
-                Some(e.to_string()),
-                RsTransferDirection::Receive,
-            ),
+            // 循环继续：accept 下一个连接，不丢弃 endpoint，不 stop discovery。
         }
     });
     track(join.abort_handle());
