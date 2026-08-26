@@ -110,6 +110,10 @@
         <string>_hyx._tcp</string>
     </array>
 
+    <!-- BLE 跨子网发现：广告/扫描用于交换局域网 IP -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>The app shares your local IP address with nearby HyX devices over Bluetooth when they are on a different subnet.</string>
+
     <!-- share_handler -->
     <key>CFBundleURLTypes</key>
     <array>

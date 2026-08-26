@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hyx_app/config/init.dart';
 import 'package:hyx_app/gen/strings.g.dart';
 import 'package:hyx_app/pages/home_page.dart';
+import 'package:hyx_app/util/ble_sharing.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 
 /// HyX 应用入口。
@@ -18,6 +19,9 @@ Future<void> main(List<String> args) async {
     runApp(_InitErrorApp(error: e, stackTrace: stackTrace));
     return;
   }
+
+  // 绑定容器到蓝牙服务，使其能在后台把发现的候选 IP 投递进设备状态。
+  attachRefena(container);
 
   runApp(
     RefenaScope.withContainer(

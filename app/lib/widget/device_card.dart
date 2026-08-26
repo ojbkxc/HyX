@@ -2,15 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:hyx_app/gen/strings.g.dart';
 import 'package:hyx_app/provider/device_provider.dart';
 
-/// 设备卡片。
+/// 设备卡片（轻量版）。
 ///
-/// 同时承载在线设备与历史设备：
+/// 仅展示设备身份与在线状态：
 /// - 在线设备（[online]=true）：正常色调，点击触发文件选择 → 发送。
 /// - 历史设备（[online]=false）：整体置灰，点击不响应；可滑动删除（由父级
 ///   [HomePage] 用 [Dismissible] 包裹实现）。
-///
-/// 每张卡片底部都有一个接收/禁止切换按钮，控制是否允许接收来自此设备的
-/// 文件传输。状态持久化在 [DeviceState.knownDevices] 中。
 ///
 /// 桌面端拖拽由父级 [DropTarget] 统一处理，此组件仅暴露 [onTap] 与
 /// [onDropFiles] 回调。
@@ -24,9 +21,6 @@ class DeviceCard extends StatelessWidget {
   /// 点击卡片：触发文件选择 → 发送。null 表示不可点击（历史设备）。
   final VoidCallback? onTap;
 
-  /// 切换接收/禁止状态。
-  final VoidCallback onToggleAllowReceive;
-
   /// 拖拽完成（桌面端）。传入拖入的文件路径列表。
   /// 移动端该回调为 null，卡片不响应拖拽。
   final void Function(List<String> paths)? onDropFiles;
@@ -37,7 +31,6 @@ class DeviceCard extends StatelessWidget {
   const DeviceCard({
     required this.device,
     required this.online,
-    required this.onToggleAllowReceive,
     this.onTap,
     this.onDropFiles,
     this.dragHover = false,
@@ -95,12 +88,6 @@ class DeviceCard extends StatelessWidget {
                     _StatusBadge(online: online),
                   ],
                 ),
-              ),
-              const SizedBox(height: 10),
-              // 下半部分：接收/禁止切换按钮。
-              _AllowReceiveToggle(
-                allowReceive: device.allowReceive,
-                onChanged: onToggleAllowReceive,
               ),
             ],
           ),
@@ -169,57 +156,6 @@ class _StatusBadge extends StatelessWidget {
             style: TextStyle(fontSize: 11, color: fg),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// 接收/禁止切换按钮。
-///
-/// 左侧图标 + 文本（✅ 接收 / ❌ 禁止），右侧 [Switch]。点击整行或 Switch
-/// 均触发 `onChanged`。
-class _AllowReceiveToggle extends StatelessWidget {
-  final bool allowReceive;
-  final VoidCallback onChanged;
-
-  const _AllowReceiveToggle({
-    required this.allowReceive,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final label = allowReceive ? t.devices.allow : t.devices.block;
-    final iconColor = allowReceive ? Colors.green : scheme.error;
-    return InkWell(
-      onTap: onChanged,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: Row(
-          children: [
-            Icon(
-              allowReceive ? Icons.check_circle : Icons.block,
-              size: 18,
-              color: iconColor,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-            const Spacer(),
-            Switch(
-              value: allowReceive,
-              onChanged: (_) => onChanged(),
-            ),
-          ],
-        ),
       ),
     );
   }

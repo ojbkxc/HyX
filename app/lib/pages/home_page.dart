@@ -5,12 +5,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hyx_app/gen/strings.g.dart';
-import 'package:hyx_app/pages/history_drawer.dart';
-import 'package:hyx_app/pages/log_sheet.dart';
-
 import 'package:hyx_app/pages/settings_page.dart';
 import 'package:hyx_app/pages/transfer_progress_sheet.dart';
 import 'package:hyx_app/provider/device_provider.dart';
+import 'package:hyx_app/util/ble_sharing.dart';
 import 'package:hyx_app/provider/log_provider.dart';
 import 'package:hyx_app/provider/transfer_provider.dart';
 import 'package:hyx_app/util/update_checker.dart';
@@ -26,17 +24,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 可重放启动期间被暂存的分享 intent。
 const _channel = MethodChannel('com.ojbkxc.hyx_app/hyx');
 
-/// HyX 主页面。
+/// HyX 主页面（轻量版）。
 ///
-/// 设备列表分两区显示：
+/// 设备列表直接作为主内容，分两区：
 /// - **在线设备**：当前局域网发现的设备，正常色调，点击发送文件。
 /// - **历史设备**：曾经遇到但当前不在线的设备，置灰显示，可滑动删除。
 ///
-/// 每个设备底部都有接收/禁止切换按钮，控制是否允许接收来自此设备的文件。
-/// 状态用 device_id（Uuid）唯一标识并持久化到 SharedPreferences。
+/// 顶部栏只保留设置入口，不用侧边抽屉；卡片仅展示名称 + 地址 + 在线状态。
+/// 设备唯一标识用 device_id（Uuid），持久化在 SharedPreferences。
 ///
-/// 应用启动时自动开始接收监听（[StartAutoListenAction]），无需手动点 FAB，
-/// 修复"手机到电脑传不了"的问题。FAB 改为查看接收状态。
+/// 应用启动时自动开始接收监听（[StartAutoListenAction]）+ BLE 跨子网发现，
+/// 无需手动点 FAB。
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -82,11 +80,14 @@ class _HomePageState extends State<HomePage> with Refena {
       unawaited(_checkForUpdate());
       // 初始化分享处理（Android）。
       _initShareHandler();
+      // 移动端启用 BLE：广告本机 IP + 扫描邻居 IP（跨子网发现的补充通道）。
+      unawaited(BleSharing.instance.start());
     });
   }
 
   @override
   void dispose() {
+    unawaited(BleSharing.instance.stop());
     unawaited(_sharedMediaSubscription?.cancel());
     _sharedMediaSubscription = null;
     super.dispose();
@@ -132,18 +133,6 @@ class _HomePageState extends State<HomePage> with Refena {
           ],
         ),
         actions: [
-          // 手动刷新。
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: t.home.refresh,
-            onPressed: () => unawaited(context.redux(deviceProvider).dispatchAsync(RefreshPeersAction())),
-          ),
-          // 日志。
-          IconButton(
-            icon: const Icon(Icons.article),
-            tooltip: t.log.title,
-            onPressed: () => showLogSheet(context),
-          ),
           // 设置：自定义设备名称等。
           IconButton(
             icon: const Icon(Icons.settings),
@@ -155,59 +144,8 @@ class _HomePageState extends State<HomePage> with Refena {
           ),
         ],
       ),
-      drawer: _buildDrawer(context),
       body: _buildBody(context, devState),
 
-    );
-  }
-
-  /// 侧边栏 Drawer：本设备信息 + 历史记录 + 设置。
-  Widget _buildDrawer(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final devState = context.watch(deviceProvider);
-    final myDev = devState.myDevice;
-    return Drawer(
-      child: SafeArea(
-        child: Column(
-          children: [
-            // 头部：本设备信息。
-            UserAccountsDrawerHeader(
-              accountName: Text(myDev?.name ?? 'HyX'),
-              accountEmail: Text(myDev != null ? 'ID: ${myDev.id.toString().substring(0, 8)}' : ''),
-              currentAccountPicture: CircleAvatar(
-                backgroundColor: scheme.primaryContainer,
-                child: Text(
-                  (myDev?.name ?? 'H')[0].toUpperCase(),
-                  style: TextStyle(fontSize: 24, color: scheme.onPrimaryContainer),
-                ),
-              ),
-            ),
-            // 历史记录（展开式）。
-            Expanded(
-              child: const HistoryDrawer(),
-            ),
-            const Divider(height: 1),
-            // 底部操作。
-            ListTile(
-
-              leading: const Icon(Icons.article),
-              title: Text(t.log.title),
-              onTap: () {
-                Navigator.pop(context);
-                showLogSheet(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: Text(t.home.about),
-              onTap: () {
-                Navigator.pop(context);
-                _showAbout(context);
-              },
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -239,7 +177,6 @@ class _HomePageState extends State<HomePage> with Refena {
               device: d,
               online: true,
               onTap: () => _sendToPeer(context, d),
-              onToggleAllowReceive: () => _toggleAllow(context, d.deviceId),
             ),
           ),
         );
@@ -279,7 +216,6 @@ class _HomePageState extends State<HomePage> with Refena {
               child: DeviceCard(
                 device: d,
                 online: false,
-                onToggleAllowReceive: () => _toggleAllow(context, d.deviceId),
               ),
             ),
           ),
@@ -450,11 +386,6 @@ class _HomePageState extends State<HomePage> with Refena {
     }
   }
 
-  /// 切换设备的接收/禁止状态。
-  void _toggleAllow(BuildContext context, String deviceId) {
-    unawaited(context.redux(deviceProvider).dispatchAsync(ToggleAllowReceiveAction(deviceId)));
-  }
-
   /// 弹出传输进度浮层。
   void _showTransferSheet() {
     if (_sheetOpen) return;
@@ -489,17 +420,6 @@ class _HomePageState extends State<HomePage> with Refena {
         ],
       ),
     );
-  }
-
-  void _showAbout(BuildContext context) {
-    unawaited(showDialog(
-      context: context,
-      builder: (ctx) => AboutDialog(
-        applicationName: t.appName,
-        applicationVersion: '0.1.0',
-        applicationLegalese: 'P2P file transfer over QUIC',
-      ),
-    ));
   }
 
   /// 检测应用更新，发现新版本时弹窗提示。
