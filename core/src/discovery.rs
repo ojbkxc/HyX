@@ -26,7 +26,7 @@ const STABILITY_WINDOW: Duration = Duration::from_secs(15);
 /// 有活动时的快速广播间隔。
 const FAST_BCAST_INTERVAL: Duration = Duration::from_secs(2);
 /// 拓扑稳定后的慢速广播间隔（仍周期广播，保证新对端可被发现）。
-const SLOW_BCAST_INTERVAL: Duration = Duration::from_secs(8);
+const SLOW_BCAST_INTERVAL: Duration = Duration::from_secs(5);
 
 /// 依据距上次发现活动的时间选择下一轮广播间隔。[`STABILITY_WINDOW`] 内用快速，
 /// 超过后放宽到慢速。纯函数，便于单元测试。
@@ -112,11 +112,20 @@ impl DiscoveryManager {
         let broadcaster = {
             let service = Arc::clone(&self.service);
             let last_activity = Arc::clone(&self.last_activity);
+            let peers = Arc::clone(&self.peers);
             tokio::spawn(async move {
                 loop {
                     let interval = {
-                        let act = last_activity.lock().expect("last_activity lock");
-                        broadcast_interval_since(*act, Instant::now())
+                        let act = *last_activity.lock().expect("last_activity lock");
+                        let peer_count = peers.read().await.len();
+                        if peer_count == 0 {
+                            // 还没发现任何对端 → 保持快速广播，确保新上线的对端
+                            // 能尽快被发现（手机热点下多播可靠性低于路由器，需要
+                            // 更积极的广播才能建立初始连接）。
+                            FAST_BCAST_INTERVAL
+                        } else {
+                            broadcast_interval_since(act, Instant::now())
+                        }
                     };
                     tokio::time::sleep(interval).await;
                     if let Err(e) = service.broadcast_beacon().await {
