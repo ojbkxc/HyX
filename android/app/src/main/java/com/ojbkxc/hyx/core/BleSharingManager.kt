@@ -102,7 +102,7 @@ internal class BleSharingManager(
             val settings = ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
                 .build()
-            s.startScan(settings, scanCallback)
+            s.startScan(null, settings, scanCallback)
         } catch (t: Throwable) {
             android.util.Log.w("BleSharing", "BLE scan failed: ${t.message}")
         }
