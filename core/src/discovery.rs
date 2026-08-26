@@ -6,7 +6,7 @@ use crate::network::udp::{DiscoveryService, PeerInfo};
 use crate::DEFAULT_DISCOVERY_PORT;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -16,6 +16,25 @@ use uuid::Uuid;
 
 /// 对同一来源 IP 回发单播信标的最短间隔，防止不同路由间回声引发 ping-pong 风暴。
 const ECHO_THROTTLE: Duration = Duration::from_secs(2);
+
+/// 单播探测的轮数。多轮重试 + 轮间指数退避，避免单次丢包就把对端误判为离线
+/// （对齐 libp2p ping 对 transient failure 的容忍）。
+const PROBE_ROUNDS: usize = 3;
+/// 每轮探测失败后的起始退避时长，随后逐轮翻倍。
+const PROBE_ROUND_BASE_DELAY: Duration = Duration::from_millis(100);
+/// 一轮内轮询 peers 表的次数。
+const PROBE_POLLS: usize = 3;
+/// 每轮内轮询间隔。
+const PROBE_POLL_INTERVAL: Duration = Duration::from_millis(150);
+/// 探测失败后进入冷却窗口的时长：窗口内对同一 IP 再次探测直接快速判定离线，
+/// 避免对长时间离线的对端反复发单播信标浪费带宽（对齐 libp2p ping 的失败惩罚）。
+const PROBE_BACKOFF: Duration = Duration::from_secs(10);
+
+/// 进程级单播探测失败冷却表（跨 manager 实例共享，因为每次探测都会新建 manager）。
+fn probe_backoff() -> &'static Mutex<HashMap<IpAddr, Instant>> {
+    static BACKOFF: OnceLock<Mutex<HashMap<IpAddr, Instant>>> = OnceLock::new();
+    BACKOFF.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Peer discovery manager
 pub struct DiscoveryManager {
@@ -212,23 +231,57 @@ impl DiscoveryManager {
     }
 
     /// 向指定 IP 的单播探测：单播本机信标到其发现端口，等待对端回声，
-    /// 超时（~1.5s）内收到回应的对端即视为在线。
+    /// 在线则返回其 [`PeerInfo`]。
     ///
     /// 这是跨子网发现的探测通道：蓝牙只负责把候选 IP 交进来（见
     /// `hyx_isolates` 的 `probe_peer`），在线与否完全由这里的单播探测决定。
     /// 对端通过接收循环里的回声逻辑回发本机信标，本机据此把它加入 peers 表。
+    ///
+    /// 稳健性（对齐 libp2p ping）：多轮重试 + 轮间指数退避，容忍单次丢包；
+    /// 探测失败后进入冷却窗口，窗口内对同一 IP 再次探测直接判定离线，避免
+    /// 对长时间离线的对端反复单播浪费带宽。
     pub async fn probe_peer(&self, target: IpAddr) -> Result<Option<PeerInfo>> {
-        let addr = SocketAddr::new(target, DEFAULT_DISCOVERY_PORT);
-        self.service.send_unicast_beacon(addr).await?;
-        // 轮询 peers 表最多 ~1.5s，等对端回声被接收循环加入。
-        for _ in 0..10 {
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            let peers = self.peers.read().await;
-            if let Some(p) = peers.values().find(|p| p.address == target) {
-                return Ok(Some(p.clone()));
+        // 失败冷却：窗口内直接快速返回离线。
+        {
+            let mut b = probe_backoff().lock().expect("probe_backoff lock");
+            if let Some(&at) = b.get(&target) {
+                if at.elapsed() < PROBE_BACKOFF {
+                    return Ok(None);
+                }
+                b.remove(&target); // 冷却到期，允许重新探测
             }
         }
-        Ok(None)
+
+        let addr = SocketAddr::new(target, DEFAULT_DISCOVERY_PORT);
+        let mut found: Option<PeerInfo> = None;
+        let mut round_delay = PROBE_ROUND_BASE_DELAY;
+        for _ in 0..PROBE_ROUNDS {
+            self.service.send_unicast_beacon(addr).await?;
+            // 轮询 peers 表，等对端回声被接收循环加入。
+            for _ in 0..PROBE_POLLS {
+                tokio::time::sleep(PROBE_POLL_INTERVAL).await;
+                let peers = self.peers.read().await;
+                if let Some(p) = peers.values().find(|p| p.address == target) {
+                    found = Some(p.clone());
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+            // 一轮未得到回声，指数退避后再试下一轮。
+            tokio::time::sleep(round_delay).await;
+            round_delay = round_delay.saturating_mul(2);
+        }
+
+        if found.is_none() {
+            // 记录失败，进入冷却窗口。
+            probe_backoff()
+                .lock()
+                .expect("probe_backoff lock")
+                .insert(target, Instant::now());
+        }
+        Ok(found)
     }
 
     /// Get our device ID
@@ -288,5 +341,48 @@ mod tests {
             let random_id = Uuid::new_v4();
             assert!(mgr.get_peer(&random_id).await.is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn test_probe_failure_enters_backoff() {
+        // 用一个无对端监听的环回地址探测：多轮后必然失败返回 None，
+        // 并进入失败冷却表；冷却窗口内再次探测被短路、明显更快。
+        let manager = match DiscoveryManager::new(
+            "Probe".to_string(),
+            crate::DEFAULT_TRANSFER_PORT,
+            [0u8; 32],
+            Uuid::new_v4(),
+            Duration::from_secs(10),
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(_) => return, // 环境无 UDP/多播能力时跳过，不视为失败。
+        };
+        if manager.start().await.is_err() {
+            return;
+        }
+        let target: IpAddr = "127.0.0.1".parse().unwrap();
+
+        let t0 = Instant::now();
+        let r1 = manager.probe_peer(target).await;
+        let first_elapsed = t0.elapsed();
+        assert!(r1.ok().flatten().is_none());
+
+        // 失败已进入冷却表。
+        assert!(probe_backoff().lock().unwrap().contains_key(&target));
+
+        // 冷却窗口内再次探测应被短路快速返回 None。
+        let t1 = Instant::now();
+        let r2 = manager.probe_peer(target).await;
+        let second_elapsed = t1.elapsed();
+        assert!(r2.ok().flatten().is_none());
+
+        manager.stop();
+        assert!(
+            second_elapsed < first_elapsed,
+            "冷却内的二次探测应明显快于首次完整多轮探测 \
+             (first={first_elapsed:?}, second={second_elapsed:?})"
+        );
     }
 }
