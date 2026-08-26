@@ -1052,8 +1052,11 @@ jobs:
 
             ### 特性
             - Rust 内核：QUIC 单连续流 + 断点续传 + 增量 SHA-256
-            - Flutter 跨平台前端（Windows / macOS / Linux / Android / iOS）
-            - 局域网自动发现、直连/配对码互传、NAT 穿透
+            - Flutter 跨平台前端（Windows / macOS / Linux / Android / iOS）+ 原生 Android 轻量版
+            - 局域网自动发现 + 单播探测（多轮重试/退避/失败冷却）
+            - 蓝牙跨子网发现（BLE 广播 IP + 扫描，补足不同网段设备）
+            - Wi-Fi Direct 无热点直连互传（对齐小米互传原理）
+            - 直连/配对码互传、NAT 穿透（rendezvous + STUN 打洞）
           files: release-assets/*
           draft: false
           prerelease: false
