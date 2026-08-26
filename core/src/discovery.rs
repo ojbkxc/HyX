@@ -17,6 +17,27 @@ use uuid::Uuid;
 /// 对同一来源 IP 回发单播信标的最短间隔，防止不同路由间回声引发 ping-pong 风暴。
 const ECHO_THROTTLE: Duration = Duration::from_secs(2);
 
+/// —— 广播节流（对齐 libp2p mdns 的 announce/TTL 语义）——
+/// 多播信标仍周期性广播以确保新上线的对端能被发现，但在"拓扑稳定"（最近
+/// 一段时间没有任何对端活动）时把广播间隔放宽，降低稳态下的 UDP 多播带宽；
+/// 一旦再次出现对端活动立即回到快速广播，保证发现灵敏度。
+/// 距上次活动小于该窗口 → 用快速广播（快速发现新对端）。
+const STABILITY_WINDOW: Duration = Duration::from_secs(15);
+/// 有活动时的快速广播间隔。
+const FAST_BCAST_INTERVAL: Duration = Duration::from_secs(2);
+/// 拓扑稳定后的慢速广播间隔（仍周期广播，保证新对端可被发现）。
+const SLOW_BCAST_INTERVAL: Duration = Duration::from_secs(8);
+
+/// 依据距上次发现活动的时间选择下一轮广播间隔。[`STABILITY_WINDOW`] 内用快速，
+/// 超过后放宽到慢速。纯函数，便于单元测试。
+fn broadcast_interval_since(last_activity: Instant, now: Instant) -> Duration {
+    if now.duration_since(last_activity) < STABILITY_WINDOW {
+        FAST_BCAST_INTERVAL
+    } else {
+        SLOW_BCAST_INTERVAL
+    }
+}
+
 /// 单播探测的轮数。多轮重试 + 轮间指数退避，避免单次丢包就把对端误判为离线
 /// （对齐 libp2p ping 对 transient failure 的容忍）。
 const PROBE_ROUNDS: usize = 3;
@@ -44,6 +65,9 @@ pub struct DiscoveryManager {
     task_handles: Mutex<Option<Vec<JoinHandle<()>>>>,
     /// 上次对某来源 IP 回发单播信标的时间，用于节流。
     last_echo: Arc<Mutex<HashMap<IpAddr, Instant>>>,
+    /// 最近一次发现"活动"的时间：收到有效对端信标或新增对端时刷新，
+    /// 用于决定多播广播间隔（拓扑活跃时快速广播，稳定后放宽）。
+    last_activity: Arc<Mutex<Instant>>,
 }
 
 impl DiscoveryManager {
@@ -67,6 +91,7 @@ impl DiscoveryManager {
             peer_ttl,
             task_handles: Mutex::new(None),
             last_echo: Arc::new(Mutex::new(HashMap::new())),
+            last_activity: Arc::new(Mutex::new(Instant::now())),
         })
     }
 
@@ -83,13 +108,17 @@ impl DiscoveryManager {
         self.stop();
         debug!("Starting discovery manager");
 
-        // Spawn beacon broadcaster
+        // Spawn beacon broadcaster（自适应间隔：拓扑活跃快速、稳定后放宽）。
         let broadcaster = {
             let service = Arc::clone(&self.service);
+            let last_activity = Arc::clone(&self.last_activity);
             tokio::spawn(async move {
-                let mut ticker = interval(Duration::from_secs(2));
                 loop {
-                    ticker.tick().await;
+                    let interval = {
+                        let act = last_activity.lock().expect("last_activity lock");
+                        broadcast_interval_since(*act, Instant::now())
+                    };
+                    tokio::time::sleep(interval).await;
                     if let Err(e) = service.broadcast_beacon().await {
                         warn!("Failed to broadcast beacon: {}", e);
                     }
@@ -103,6 +132,7 @@ impl DiscoveryManager {
             let peers = Arc::clone(&self.peers);
             let our_device_id = service.device_id();
             let last_echo = Arc::clone(&self.last_echo);
+            let last_activity = Arc::clone(&self.last_activity);
 
             tokio::spawn(async move {
                 loop {
@@ -112,6 +142,9 @@ impl DiscoveryManager {
                             if beacon.device_id == our_device_id {
                                 continue;
                             }
+
+                            // 收到有效对端信标 → 拓扑有活动，回到快速广播。
+                            *last_activity.lock().expect("last_activity lock") = Instant::now();
 
                             let ip = src_addr.ip();
                             // 回声应答：向来源地址单播回发本机信标（按 IP 节流），
@@ -341,6 +374,23 @@ mod tests {
             let random_id = Uuid::new_v4();
             assert!(mgr.get_peer(&random_id).await.is_none());
         }
+    }
+
+    #[test]
+    fn broadcast_interval_is_fast_then_slow() {
+        let now = Instant::now();
+        // 距上次活动较近（< STABILITY_WINDOW）→ 快速广播。
+        let recent = now - Duration::from_millis(100);
+        assert_eq!(
+            broadcast_interval_since(recent, now),
+            FAST_BCAST_INTERVAL
+        );
+        // 拓扑稳定较久（>= STABILITY_WINDOW）→ 放宽到慢速广播。
+        let stable = now - Duration::from_secs(20);
+        assert_eq!(
+            broadcast_interval_since(stable, now),
+            SLOW_BCAST_INTERVAL
+        );
     }
 
     #[tokio::test]
